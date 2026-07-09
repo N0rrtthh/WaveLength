@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src https://*.supabase.co wss://*.supabase.co; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none';">
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=()">
+<title>Wavelength — Anonymous Chat</title>
+<link rel="stylesheet" href="style.css">
+<!-- Pinned to exact version 2.49.4 with verified SRI hash -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"
+        integrity="sha384-2zrRDgDHSYB/GN3nFW3fsZXoxEhKIr3N2h63Tc6DEOB9JJdFIu8xMJT2Cph/gBil"
+        crossorigin="anonymous"></script>
+<script src="config.js"></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+
+<!-- Landing page -->
+<div class="landing" id="landing">
+  <div class="landing-card">
+    <div class="landing-logo">
+      <svg viewBox="0 0 64 64" fill="none">
+        <circle cx="32" cy="32" r="7" fill="#6fd8c4"/>
+        <circle cx="32" cy="32" r="18" stroke="#6fd8c4" stroke-width="2" opacity="0.55"/>
+        <circle cx="32" cy="32" r="30" stroke="#6fd8c4" stroke-width="1.4" opacity="0.25"/>
+      </svg>
+    </div>
+    <h1>Wavelength</h1>
+    <p>Anonymous, ephemeral conversations.<br>Nothing is stored. No accounts needed.</p>
+    <div class="landing-name-wrap">
+      <label for="landingNameInput">YOUR CALLSIGN</label>
+      <div class="landing-name-row">
+        <input id="landingNameInput" type="text" maxlength="24" placeholder="Your name" autocomplete="off" spellcheck="false">
+        <button id="landingRegenBtn" title="Random name">↻</button>
+      </div>
+    </div>
+    <button class="btn-connect" id="connectBtn">Connect</button>
+    <span class="landing-hint">Ephemeral · nothing stored · browser-only</span>
+  </div>
+</div>
+
+<div class="app">
+  <header>
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 28 28" fill="none">
+          <circle cx="14" cy="14" r="3" fill="#6fd8c4"/>
+          <circle cx="14" cy="14" r="8" stroke="#6fd8c4" stroke-width="1.4" opacity="0.55"/>
+          <circle cx="14" cy="14" r="13" stroke="#6fd8c4" stroke-width="1" opacity="0.25"/>
+        </svg>
+      </div>
+      <h1>Wavelength</h1>
+    </div>
+    <div class="callsign">
+      <span id="connStatus" title="Connecting…" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-dim);vertical-align:middle;transition:.3s"></span>
+      <span class="callsign-name" id="nameDisplay"></span>
+      <button class="btn-home" id="homeBtn" title="Main menu" aria-label="Main menu">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2 6.5L8 2l6 4.5V14a.5.5 0 01-.5.5h-3.75v-3.25h-3.5V14.5H2.5A.5.5 0 012 14V6.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <div class="tab active" data-mode="hop" role="tab" tabindex="0">Frequency Hop</div>
+    <div class="tab" data-mode="channels" role="tab" tabindex="0">Channels</div>
+  </div>
+
+  <div class="panel" id="panel" role="main"></div>
+
+  <div class="footnote">
+    Ephemeral · nothing is stored · messages exist only in transit
+  </div>
+</div>
+
+</body>
+</html>
