@@ -116,7 +116,23 @@ function getAudioCtx() {
     _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   return _audioCtx;
 }
-function playClick() {
+let soundEnabled = true;
+function playSend() {
+  if (!soundEnabled) return;
+  try {
+    const ctx = getAudioCtx();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sine';
+    o.frequency.setValueAtTime(440, ctx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(660, ctx.currentTime + 0.07);
+    g.gain.setValueAtTime(0.1, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+    o.start(); o.stop(ctx.currentTime + 0.1);
+  } catch (e) {}
+}
+function playReceive() {
+  if (!soundEnabled) return;
   try {
     const ctx = getAudioCtx();
     const o = ctx.createOscillator(), g = ctx.createGain();
@@ -135,8 +151,12 @@ const baseTitle = document.title;
 function flashUnread() {
   if (document.hidden) { unreadCount++; document.title = `(${unreadCount}) ${baseTitle}`; }
 }
+// Reconnect on tab focus
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) { unreadCount = 0; document.title = baseTitle; }
+  if (!document.hidden) {
+    unreadCount = 0; document.title = baseTitle;
+    if (channelChan && currentChannelName) lastPeerHeard = Date.now();
+  }
 });
 
 let mode = 'hop';
@@ -144,9 +164,9 @@ let hopState = 'idle';
 let lobbyChan = null, pairChan = null, pairPeerName = null, pairRoom = null;
 let pendingTarget = null, pendingRoom = null, pendingTimer = null, lookInterval = null;
 let channelChan = null, currentChannelName = null;
-const takenIds = new Set();
+const channelMembers = new Map(); // channelName -> Set of ids
 
-const ROOMS = [
+const takenIds = new Set();
   { name: 'general',     tag: 'anything goes' },
   { name: 'late-night',  tag: 'for the sleepless' },
   { name: 'confessions', tag: 'say the quiet part' },
@@ -319,9 +339,15 @@ function connectPair() {
   startHeartbeat(pairChan, true);
   pairChan.onmessage = (e) => {
     const m = e.data;
-    if (m.type === 'heartbeat' && m.from !== myId) { lastPeerHeard = Date.now(); if (peerDead) recoverPeer(); return; }
+    if (m.type === 'heartbeat' && m.from !== myId) {
+      lastPeerHeard = Date.now();
+      // Mark all sent ticks as delivered
+      document.querySelectorAll('.msg-tick:not(.delivered)').forEach(t => { t.textContent = '✓✓'; t.classList.add('delivered'); });
+      if (peerDead) recoverPeer();
+      return;
+    }
     if (m.from === myId) return;
-    if (m.type === 'msg' && typeof m.text === 'string') appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id);
+    if (m.type === 'msg' && typeof m.text === 'string') { appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id); playReceive(); }
     else if (m.type === 'typing') setTyping(pairPeerName, m.state === true);
     else if (m.type === 'react' && m.mid) applyReaction(m.mid, m.emoji, m.from, m.add === true);
     else if (m.type === 'leave') {
@@ -350,17 +376,48 @@ function leaveHop() {
 
 function renderChannelList() {
   panel.innerHTML = '';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'channel-list-wrap';
   const list = document.createElement('div');
   list.className = 'channel-list';
+
   [...ROOMS, ...customRooms].forEach(r => {
+    const isCustom = customRooms.includes(r);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;';
+
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'channel-item';
-    b.innerHTML = `<div><div class="name">#${escapeHtml(r.name)}</div><div class="tag">${escapeHtml(r.tag || 'custom room')}</div></div><span class="active-dot" style="opacity:0"></span>`;
+    b.style.flex = '1';
+    const members = channelMembers.get(r.name);
+    const countHtml = members && members.size > 0
+      ? `<span class="channel-member-badge">${members.size} online</span>`
+      : `<span class="active-dot" style="opacity:0"></span>`;
+    b.innerHTML = `<div><div class="name">#${escapeHtml(r.name)}</div><div class="tag">${escapeHtml(r.tag || 'custom room')}</div></div>${countHtml}`;
     b.onclick = () => joinChannel(r.name);
-    list.appendChild(b);
+    row.appendChild(b);
+
+    if (isCustom) {
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'channel-item-remove';
+      del.textContent = '×';
+      del.title = 'Remove room';
+      del.onclick = (e) => {
+        e.stopPropagation();
+        const idx = customRooms.indexOf(r);
+        if (idx !== -1) customRooms.splice(idx, 1);
+        renderChannelList();
+      };
+      row.appendChild(del);
+    }
+    list.appendChild(row);
   });
-  panel.appendChild(list);
+
+  wrap.appendChild(list);
+  panel.appendChild(wrap);
 
   const box = document.createElement('div');
   box.className = 'room-create';
@@ -381,6 +438,7 @@ function renderChannelList() {
 function joinChannel(name) {
   if (typeof name !== 'string' || !CHANNEL_NAME_RE.test(name)) return;
   currentChannelName = name;
+  if (!channelMembers.has(name)) channelMembers.set(name, new Set());
   channelChan = makeChannel('wavelength-room-' + name, true);
   if (!channelChan) return;
   render();
@@ -390,11 +448,18 @@ function joinChannel(name) {
     const m = e.data;
     if (m.from === myId) return;
     if (m.type === 'heartbeat') { lastPeerHeard = Date.now(); return; }
-    if (m.type === 'msg' && typeof m.text === 'string')
-      appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id);
+    if (m.type === 'msg' && typeof m.text === 'string') { appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id); playReceive(); }
     else if (m.type === 'typing') setTyping(sanitizeName(m.fromName), m.state === true);
-    else if (m.type === 'join') pushSystemMsg(`${sanitizeName(m.fromName)} joined.`);
+    else if (m.type === 'join') {
+      const members = channelMembers.get(name);
+      if (members && m.from) members.add(m.from);
+      updateMemberCount();
+      pushSystemMsg(`${sanitizeName(m.fromName)} joined.`);
+    }
     else if (m.type === 'leave') {
+      const members = channelMembers.get(name);
+      if (members && m.from) members.delete(m.from);
+      updateMemberCount();
       setTyping(sanitizeName(m.fromName), false);
       pushSystemMsg(`${sanitizeName(m.fromName)} left.`);
     }
@@ -408,9 +473,20 @@ function leaveChannel() {
     channelChan.postMessage({ type: 'leave', from: myId, fromName: myName });
     channelChan.close(); channelChan = null;
   }
+  if (currentChannelName) {
+    const members = channelMembers.get(currentChannelName);
+    if (members) members.delete(myId);
+  }
   stopHeartbeat();
   currentChannelName = null;
   render();
+}
+
+function updateMemberCount() {
+  const el = document.getElementById('memberCount');
+  if (!el || !currentChannelName) return;
+  const members = channelMembers.get(currentChannelName);
+  el.textContent = members && members.size > 0 ? `${members.size} online` : '';
 }
 
 let hbInterval = null, hbWatch = null, hbIsPair = false, lastPeerHeard = 0, peerDead = false;
@@ -453,6 +529,10 @@ function renderChat({ peer, onLeave, isChannel }) {
   panel.innerHTML = `
     <div class="chat-header">
       <span class="who"><span class="online-dot"></span>${safePeer}</span>
+      <div class="chat-header-right">
+        ${isChannel ? '<span class="member-count" id="memberCount"></span>' : ''}
+        <button class="btn-mute" id="muteBtn" title="Toggle sound">${soundEnabled ? '🔔' : '🔕'}</button>
+      </div>
     </div>
     <div class="msgs" id="msgs" role="log" aria-live="polite"></div>
     <button class="scroll-btn" id="scrollBtn" type="button">↓</button>
@@ -464,12 +544,29 @@ function renderChat({ peer, onLeave, isChannel }) {
     </div>
     <div class="char-count" id="charCount"></div>`;
 
+  document.getElementById('muteBtn').onclick = () => {
+    soundEnabled = !soundEnabled;
+    document.getElementById('muteBtn').textContent = soundEnabled ? '🔔' : '🔕';
+  };
+
+  if (isChannel) updateMemberCount();
+
   document.getElementById('leaveBtn').onclick = () => showConfirmBar(onLeave);
 
   const input = document.getElementById('msgInput');
   const sendBtn = document.getElementById('sendBtn');
   const charCount = document.getElementById('charCount');
   const msgsEl = document.getElementById('msgs');
+  const scrollBtn = document.getElementById('scrollBtn');
+
+  scrollBtn.onclick = () => { msgsEl.scrollTop = msgsEl.scrollHeight; };
+  msgsEl.addEventListener('scroll', () => {
+    const atBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 60;
+    scrollBtn.classList.toggle('visible', !atBottom);
+  }, { passive: true });
+
+  // Dismiss confirm bar when user starts typing again
+  input.addEventListener('input', () => { const b = document.getElementById('confirmBar'); if (b) b.remove(); }, { passive: true });
 
   let iAmTyping = false, typingDebounceTimer = null;
   function sendTypingState(state) {
@@ -533,7 +630,7 @@ function renderChat({ peer, onLeave, isChannel }) {
     }
     if (iAmTyping) { iAmTyping = false; sendTypingState(false); }
     clearTimeout(typingDebounceTimer);
-    playClick();
+    playSend();
     const mid = randHex(8);
     appendMsg(text, 'me', undefined, mid);
     let result;
@@ -614,7 +711,6 @@ function appendMsg(text, who, label, mid) {
   row.className = 'msg-row ' + safeWho;
   if (mid) row.dataset.mid = mid;
   const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const initials = label ? label.slice(0, 2).toUpperCase() : (pairPeerName ? pairPeerName.slice(0, 2).toUpperCase() : '??');
   const bubble = document.createElement('div');
   bubble.className = 'msg ' + safeWho;
   const textEl = document.createElement('div');
@@ -622,7 +718,16 @@ function appendMsg(text, who, label, mid) {
   textEl.textContent = text;
   const meta = document.createElement('div');
   meta.className = 'msg-meta';
-  meta.textContent = time;
+  const timeSpan = document.createElement('span');
+  timeSpan.textContent = time;
+  meta.appendChild(timeSpan);
+  if (safeWho === 'me' && mid) {
+    const tick = document.createElement('span');
+    tick.className = 'msg-tick';
+    tick.textContent = '✓';
+    tick.id = 'tick-' + mid;
+    meta.appendChild(tick);
+  }
   bubble.appendChild(textEl);
   bubble.appendChild(meta);
   if (mid) {
@@ -635,6 +740,11 @@ function appendMsg(text, who, label, mid) {
     reactBtn.textContent = '🙂';
     reactBtn.setAttribute('aria-label', 'Add reaction');
     reactBtn.onclick = (e) => { e.stopPropagation(); openReactTray(mid, reactBtn); };
+    // Long-press to react on mobile
+    let lpTimer = null;
+    bubble.addEventListener('touchstart', () => { lpTimer = setTimeout(() => openReactTray(mid, reactBtn), 500); }, { passive: true });
+    bubble.addEventListener('touchend', () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }, { passive: true });
+    bubble.addEventListener('touchmove', () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }, { passive: true });
     bubble.appendChild(reactWrap);
     bubble.appendChild(reactBtn);
     rowByMid.set(mid, row);
@@ -642,7 +752,7 @@ function appendMsg(text, who, label, mid) {
   if (safeWho === 'them') {
     const av = document.createElement('div');
     av.className = 'avatar';
-    av.textContent = '?';
+    av.textContent = (label || pairPeerName || '?').slice(0, 2).toUpperCase();
     row.appendChild(av);
   }
   row.appendChild(bubble);
@@ -709,6 +819,11 @@ function openReactTray(mid, btn) {
     tray.appendChild(b);
   });
   btn.parentElement.appendChild(tray);
+  // Flip tray downward if it would be clipped at the top
+  requestAnimationFrame(() => {
+    const rect = tray.getBoundingClientRect();
+    if (rect.top < 0) tray.classList.add('flip-down');
+  });
   setTimeout(() => {
     const close = () => { tray.remove(); document.removeEventListener('click', close, true); };
     document.addEventListener('click', close, true);
