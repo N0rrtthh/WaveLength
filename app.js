@@ -3,8 +3,24 @@ function getAnonKey() { return window.WAVELENGTH_CONFIG?.supabaseAnonKey ?? ''; 
 
 const configured = SUPABASE_URL.startsWith('https://') && getAnonKey().length > 20;
 const sb = configured ? window.supabase.createClient(SUPABASE_URL, getAnonKey(), {
-  realtime: { params: { eventsPerSecond: 20 } }
+  realtime: {
+    params: { eventsPerSecond: 20 },
+  },
+  auth: { persistSession: false },
 }) : null;
+
+// Test that realtime broadcast works between two clients
+if (sb) {
+  const testCh = sb.channel('wl-test', { config: { broadcast: { self: false } } });
+  testCh.on('broadcast', { event: 'ping' }, (m) => console.log('[WL] broadcast test RECEIVED:', m));
+  testCh.subscribe((s) => {
+    console.log('[WL] test channel status:', s);
+    if (s === 'SUBSCRIBED') {
+      testCh.send({ type: 'broadcast', event: 'ping', payload: { hello: 'world', ts: Date.now() } })
+        .then(r => console.log('[WL] test send result:', r));
+    }
+  });
+}
 
 function updateStatus(ok, msg) {
   const dot = document.getElementById('connStatus');
