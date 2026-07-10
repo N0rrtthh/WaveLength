@@ -17,16 +17,17 @@ body{
   color:var(--text);
   font-family:var(--sans);
   min-height:100vh;
+  min-height:100dvh;
   display:flex;
   justify-content:center;
-  padding:24px 16px;
+  padding:16px 12px;
 }
 .app{
   width:100%;
   max-width:640px;
   display:flex;
   flex-direction:column;
-  gap:16px;
+  gap:12px;
 }
 header{
   display:flex;
@@ -86,7 +87,7 @@ header{
   background:var(--ink-2);
   border:1px solid var(--ink-3);
   border-radius:14px;
-  padding:18px;
+  padding:14px;
   min-height:420px;
   display:flex;
   flex-direction:column;
@@ -185,7 +186,7 @@ header{
   flex-direction:column;
   gap:4px;
   padding-right:4px;
-  max-height:300px;
+  max-height:clamp(200px, 45vh, 380px);
 }
 .msg-row{ display:flex; align-items:flex-end; gap:7px; }
 .msg-row.me{ justify-content:flex-end; }
@@ -250,27 +251,30 @@ header{
 
 .composer{
   display:flex; gap:6px; margin-top:6px; align-items:center;
+  flex-wrap:nowrap;
 }
 .btn-leave{
   background:none;
   border:1px solid var(--ink-3);
   color:var(--text-dim);
-  padding:0 11px;
+  padding:0 10px;
   height:42px;
   border-radius:10px;
-  font-size:12px;
+  font-size:11px;
   font-family:var(--mono);
   cursor:pointer;
   flex-shrink:0;
   transition:.15s;
+  white-space:nowrap;
 }
 .btn-leave:hover{border-color:var(--signal); color:var(--signal);}
 .composer input{
   flex:1;
+  min-width:0;
   background:var(--ink);
   border:1px solid var(--ink-3);
   color:var(--text);
-  padding:11px 14px;
+  padding:11px 10px;
   border-radius:10px;
   font-size:14px;
   font-family:var(--sans);
@@ -281,7 +285,7 @@ header{
   background:var(--teal);
   border:none;
   color:#0d1a17;
-  padding:0 16px;
+  padding:0 14px;
   height:42px;
   border-radius:10px;
   font-weight:700;
@@ -346,9 +350,9 @@ header{
   background:var(--ink-2);
   border:1px solid var(--ink-3);
   border-radius:20px;
-  padding:40px 36px;
+  padding:32px 20px;
   width:100%; max-width:380px;
-  display:flex; flex-direction:column; align-items:center; gap:22px;
+  display:flex; flex-direction:column; align-items:center; gap:18px;
   text-align:center;
 }
 .landing-logo svg{ width:64px; height:64px; }
@@ -417,6 +421,30 @@ header{
   text-align:center;
   opacity:.6;
   line-height:1.6;
+}
+
+@media (max-width:480px){
+  body{ padding:8px; }
+  .app{ gap:8px; }
+  .panel{ padding:10px; border-radius:10px; min-height:0; flex:1; }
+  .brand h1{ font-size:13px; }
+  .tab{ font-size:12px; padding:8px 6px; }
+  .msgs{ max-height:clamp(160px, 42vh, 320px); }
+  .msg{ font-size:13px; padding:8px 11px; }
+  .composer input{ font-size:13px; padding:10px 8px; }
+  .btn-send{ padding:0 12px; font-size:12px; }
+  .btn-leave{ padding:0 8px; font-size:11px; }
+  .landing-card{ padding:24px 14px; border-radius:14px; }
+  .disconnected-bar{ flex-direction:column; gap:8px; text-align:center; }
+  .confirm-bar{ flex-direction:column; gap:8px; text-align:center; }
+  .chat-header .who{ font-size:11px; }
+  .channel-item .name{ font-size:13px; }
+  .room-create input{ font-size:13px; }
+}
+
+@media (max-width:360px){
+  .btn-leave{ display:none; }
+  .composer{ gap:4px; }
 }
 
 .setup-gate{

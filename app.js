@@ -175,7 +175,20 @@ tabs.forEach((t, i) => {
   };
 });
 function activateTab(m) {
-  if (!VALID_MODES.has(m)) return;
+  if (!VALID_MODES.has(m) || mode === m) return;
+  // If currently in a live chat, ask for confirmation before switching
+  const inHopChat = mode === 'hop' && hopState === 'matched';
+  const inChannel = mode === 'channels' && currentChannelName;
+  if (inHopChat || inChannel) {
+    showConfirmBar(() => {
+      tabs.forEach(x => x.classList.remove('active'));
+      tabs.find(x => x.dataset.mode === m).classList.add('active');
+      mode = m;
+      leaveEverything();
+      render();
+    });
+    return;
+  }
   tabs.forEach(x => x.classList.remove('active'));
   tabs.find(x => x.dataset.mode === m).classList.add('active');
   mode = m;
@@ -332,6 +345,9 @@ function leaveHop() {
   stopHeartbeat();
   hopState = 'idle';
   pairPeerName = null;
+  pairRoom = null;
+  pendingTarget = null;
+  pendingRoom = null;
   takenIds.clear();
   render();
 }
@@ -560,7 +576,9 @@ function showConfirmBar(onConfirm) {
   const bar = document.createElement('div');
   bar.className = 'confirm-bar'; bar.id = 'confirmBar';
   bar.innerHTML = `<span>Leave this chat?</span><div class="cbar-btns"><button class="cbar-yes" id="cbarYes" type="button">Leave</button><button class="cbar-no" id="cbarNo" type="button">Stay</button></div>`;
-  document.getElementById('charCount').after(bar);
+  const anchor = document.getElementById('charCount') || document.getElementById('msgs');
+  if (anchor) anchor.after(bar);
+  else panel.appendChild(bar);
   document.getElementById('cbarYes').onclick = onConfirm;
   document.getElementById('cbarNo').onclick = () => bar.remove();
 }
@@ -600,7 +618,7 @@ function appendMsg(text, who, label, mid) {
   textEl.textContent = text;
   const meta = document.createElement('div');
   meta.className = 'msg-meta';
-  meta.textContent = (safeWho === 'them' && label ? label + ' · ' : '') + time;
+  meta.textContent = time;
   bubble.appendChild(textEl);
   bubble.appendChild(meta);
   if (mid) {
@@ -620,7 +638,7 @@ function appendMsg(text, who, label, mid) {
   if (safeWho === 'them') {
     const av = document.createElement('div');
     av.className = 'avatar';
-    av.textContent = initials;
+    av.textContent = '?';
     row.appendChild(av);
   }
   row.appendChild(bubble);
