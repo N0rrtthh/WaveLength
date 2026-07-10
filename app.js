@@ -11,7 +11,7 @@ function sanitizeName(s) {
   return s.replace(/[^\w .\-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24) || 'Unknown';
 }
 
-const configured = SUPABASE_URL.startsWith('https://') && getAnonKey().length > 20;
+const configured = SUPABASE_URL.startsWith('https://') && getAnonKey().startsWith('eyJ');
 const sb = configured ? window.supabase.createClient(SUPABASE_URL, getAnonKey(), {
   realtime: { params: { eventsPerSecond: 20 } },
   auth: { persistSession: false },
@@ -256,7 +256,7 @@ function render() {
     const dot = document.createElement('span');
     dot.className = 'status-dot bad';
     banner.appendChild(dot);
-    banner.appendChild(document.createTextNode(' Config missing — set supabaseUrl & supabaseAnonKey in config.js'));
+    banner.appendChild(document.createTextNode(' Config missing — go to Supabase Dashboard → Project Settings → API and copy the anon public key (starts with eyJ) into config.js'));
     panel.prepend(banner);
   }
 }
