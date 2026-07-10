@@ -4,7 +4,7 @@ function getAnonKey() { return window.WAVELENGTH_CONFIG?.supabaseAnonKey ?? ''; 
 const DEV_MODE = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 const RELAY_URL = DEV_MODE
   ? null
-  : `${SUPABASE_URL}/functions/v1/relay`;
+  : `${SUPABASE_URL}/functions/v1/broadcast-relay`;
 
 const configured = SUPABASE_URL.startsWith('https://') && getAnonKey().length > 20;
 const sb = configured ? window.supabase.createClient(SUPABASE_URL, getAnonKey(), {
