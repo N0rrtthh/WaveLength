@@ -180,6 +180,7 @@ header{
 .msgs{
   flex:1;
   overflow-y:auto;
+  overflow-x:hidden;
   display:flex;
   flex-direction:column;
   gap:4px;
@@ -199,11 +200,14 @@ header{
 }
 .msg{
   max-width:75%;
+  min-width:0;
   padding:9px 13px;
   border-radius:16px;
   font-size:14px;
   line-height:1.45;
   position:relative;
+  overflow-wrap:break-word;
+  word-break:break-word;
 }
 .msg-text{ white-space:pre-wrap; word-break:break-word; }
 .msg.me{
