@@ -40,9 +40,11 @@ function makeChannel(name, selfEcho = false) {
   let subscribed = false;
   const queue = [];
   channel.on('broadcast', { event: 'data' }, (msg) => {
+    console.log('[WL] recv on', name, msg.payload);
     if (handler) handler({ data: msg.payload });
   });
   channel.subscribe((status) => {
+    console.log('[WL] channel', name, 'status:', status);
     if (status === 'SUBSCRIBED') {
       subscribed = true;
       queue.splice(0).forEach(([p, res]) =>
@@ -56,12 +58,15 @@ function makeChannel(name, selfEcho = false) {
     set onmessage(fn) { handler = fn; },
     async postMessage(payload) {
       if (!subscribed) {
+        console.log('[WL] queued (not subscribed yet):', payload.type, 'on', name);
         return new Promise(resolve => queue.push([payload, resolve]));
       }
+      console.log('[WL] send on', name, payload);
       try {
-        await channel.send({ type: 'broadcast', event: 'data', payload });
+        const res = await channel.send({ type: 'broadcast', event: 'data', payload });
+        console.log('[WL] send result:', res);
         return 'ok';
-      } catch { return 'error'; }
+      } catch(e) { console.error('[WL] send error:', e); return 'error'; }
     },
     close() { closed = true; sb.removeChannel(channel); }
   };
