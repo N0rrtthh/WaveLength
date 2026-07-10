@@ -11,7 +11,7 @@ function sanitizeName(s) {
   return s.replace(/[^\w .\-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24) || 'Unknown';
 }
 
-const configured = SUPABASE_URL.startsWith('https://') && getAnonKey().startsWith('eyJ');
+const configured = SUPABASE_URL.startsWith('https://') && (getAnonKey().startsWith('eyJ') || getAnonKey().startsWith('sb_'));
 const sb = configured ? window.supabase.createClient(SUPABASE_URL, getAnonKey(), {
   realtime: { params: { eventsPerSecond: 20 } },
   auth: { persistSession: false },
