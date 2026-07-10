@@ -31,9 +31,10 @@ monitorConnection();
 const REACTION_EMOJIS = ['❤️', '😂', '👍', '🔥', '😮', '😢', '🎉'];
 
 const CHANNEL_NAME_RE = /^[a-z0-9_-]{1,64}$/;
-function makeChannel(name) {
+// selfEcho=true only for lobby so both sides see looking/claim messages
+function makeChannel(name, selfEcho = false) {
   if (!CHANNEL_NAME_RE.test(name)) { console.error('Invalid channel name:', name); return null; }
-  const channel = sb.channel(name, { config: { broadcast: { self: true, ack: false } } });
+  const channel = sb.channel(name, { config: { broadcast: { self: selfEcho, ack: false } } });
   let handler = null;
   let closed = false;
   let subscribed = false;
@@ -246,7 +247,7 @@ function renderHopSearching() {
 function startHopSearch() {
   hopState = 'searching';
   render();
-  lobbyChan = makeChannel('wavelength-lobby');
+  lobbyChan = makeChannel('wavelength-lobby', true);
   lobbyChan.onmessage = handleLobby;
   // first looking is queued and sent once subscribed
   lobbyChan.postMessage({ type: 'looking', id: myId, fromName: myName });
@@ -301,19 +302,17 @@ function handleLobby(e) {
 function connectPair() {
   hopState = 'matched';
   if (lobbyChan) { lobbyChan.close(); lobbyChan = null; }
-  pairChan = makeChannel(pairRoom);
+  pairChan = makeChannel(pairRoom, false);
   render();
   pushSystemMsg(`Connected to ${pairPeerName}.`);
   startHeartbeat(pairChan, true);
   pairChan.onmessage = (e) => {
     const m = e.data;
-    lastPeerHeard = Date.now();
-    if (peerDead && hbIsPair) recoverPeer();
-    if (m.type === 'msg' && m.from !== myId && typeof m.text === 'string') appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id);
-    else if (m.type === 'typing' && m.from !== myId) setTyping(pairPeerName, m.state === true);
-    else if (m.type === 'heartbeat') { /* handled above */ }
+    if (m.type === 'heartbeat') { lastPeerHeard = Date.now(); if (peerDead && hbIsPair) recoverPeer(); return; }
+    if (m.type === 'msg' && typeof m.text === 'string') appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id);
+    else if (m.type === 'typing') setTyping(pairPeerName, m.state === true);
     else if (m.type === 'react' && m.mid) applyReaction(m.mid, m.emoji, m.from, m.add === true);
-    else if (m.type === 'leave' && m.from !== myId) {
+    else if (m.type === 'leave') {
       stopHeartbeat();
       setTyping('', false);
       pushSystemMsg(`${pairPeerName} disconnected.`);
@@ -366,14 +365,13 @@ function renderChannelList() {
 function joinChannel(name) {
   if (typeof name !== 'string' || !CHANNEL_NAME_RE.test(name)) return;
   currentChannelName = name;
-  channelChan = makeChannel('wavelength-room-' + name);
+  channelChan = makeChannel('wavelength-room-' + name, false);
   if (!channelChan) return;
   render();
   pushSystemMsg(`You joined #${escapeHtml(name)} as ${escapeHtml(myName)}.`);
   startHeartbeat(channelChan, false);
   channelChan.onmessage = (e) => {
     const m = e.data;
-    lastPeerHeard = Date.now();
     if (m.type === 'msg' && m.from !== myId && typeof m.text === 'string')
       appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id);
     else if (m.type === 'typing' && m.from !== myId) setTyping(sanitizeName(m.fromName), m.state === true);
