@@ -1,6 +1,16 @@
 const SUPABASE_URL = window.WAVELENGTH_CONFIG?.supabaseUrl ?? '';
 function getAnonKey() { return window.WAVELENGTH_CONFIG?.supabaseAnonKey ?? ''; }
 
+// Helpers hoisted to top so they're available everywhere immediately
+function escapeHtml(s) {
+  if (typeof s !== 'string') return '';
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
+}
+function sanitizeName(s) {
+  if (typeof s !== 'string') return 'Unknown';
+  return s.replace(/[^\w .\-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24) || 'Unknown';
+}
+
 const configured = SUPABASE_URL.startsWith('https://') && getAnonKey().length > 20;
 const sb = configured ? window.supabase.createClient(SUPABASE_URL, getAnonKey(), {
   realtime: { params: { eventsPerSecond: 20 } },
@@ -165,8 +175,9 @@ let lobbyChan = null, pairChan = null, pairPeerName = null, pairRoom = null;
 let pendingTarget = null, pendingRoom = null, pendingTimer = null, lookInterval = null;
 let channelChan = null, currentChannelName = null;
 const channelMembers = new Map(); // channelName -> Set of ids
-
 const takenIds = new Set();
+
+const ROOMS = [
   { name: 'general',     tag: 'anything goes' },
   { name: 'late-night',  tag: 'for the sleepless' },
   { name: 'confessions', tag: 'say the quiet part' },
@@ -230,14 +241,6 @@ function leaveEverything() {
 
 function render() {
   panel.innerHTML = '';
-  if (!configured) {
-    panel.innerHTML = `
-      <div class="setup-gate">
-        <h2><span class="status-dot bad"></span>Not connected yet</h2>
-        <p>Set <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> in config.js. Deploy the relay Edge Function. No tables needed — Realtime Broadcast only.</p>
-      </div>`;
-    return;
-  }
   if (mode === 'hop') {
     if (hopState === 'idle') renderHopIdle();
     else if (hopState === 'searching' || hopState === 'pending') renderHopSearching();
@@ -245,6 +248,12 @@ function render() {
   } else {
     if (currentChannelName) renderChat({ peer: '#' + currentChannelName, onLeave: leaveChannel, isChannel: true });
     else renderChannelList();
+  }
+  if (!configured) {
+    const banner = document.createElement('div');
+    banner.className = 'setup-banner';
+    banner.innerHTML = `<span class="status-dot bad"></span> Config missing — set <code>supabaseUrl</code> &amp; <code>supabaseAnonKey</code> in <code>config.js</code>`;
+    panel.prepend(banner);
   }
 }
 
@@ -845,16 +854,6 @@ function disableComposer() {
   const btn = document.getElementById('sendBtn');
   if (inp) inp.disabled = true;
   if (btn) btn.disabled = true;
-}
-
-function escapeHtml(s) {
-  if (typeof s !== 'string') return '';
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
-}
-
-function sanitizeName(s) {
-  if (typeof s !== 'string') return 'Unknown';
-  return s.replace(/[^\w .\-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24) || 'Unknown';
 }
 
 window.addEventListener('beforeunload', () => {
