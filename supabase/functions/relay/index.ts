@@ -1,5 +1,3 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.4';
-
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
@@ -92,20 +90,26 @@ Deno.serve(async (req) => {
     safePayload.add = payload.add === true;
   }
 
-  const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-    realtime: { params: { eventsPerSecond: 100 } },
-  });
-  const ch = sb.channel(channel);
-  await new Promise<void>((resolve) => {
-    ch.subscribe((status) => { if (status === 'SUBSCRIBED') resolve(); });
-  });
-  const { error } = await ch.send({
-    type: 'broadcast',
-    event: 'data',
-    payload: safePayload,
-  });
-  await sb.removeChannel(ch);
+  // Use REST broadcast API — no WebSocket handshake, instant delivery
+  const broadcastRes = await fetch(
+    `${SUPABASE_URL}/realtime/v1/api/broadcast`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_SERVICE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+      },
+      body: JSON.stringify({
+        messages: [{
+          topic: channel,
+          event: 'data',
+          payload: safePayload,
+        }],
+      }),
+    }
+  );
 
-  if (error) return new Response('Relay error', { status: 502 });
+  if (!broadcastRes.ok) return new Response('Relay error', { status: 502 });
   return new Response('OK', { status: 200 });
 });

@@ -64,20 +64,30 @@ function makeChannel(name) {
   const channel = sb.channel(name, { config: { broadcast: { self: DEV_MODE } } });
   let handler = null;
   let closed = false;
+  let subscribed = false;
+  const queue = [];
   channel.on('broadcast', { event: 'data' }, (msg) => {
     if (handler && (DEV_MODE || msg.payload?._serverVerified === true))
       handler({ data: msg.payload });
   });
   channel.subscribe((status) => {
-    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-      if (!closed) {
-        setTimeout(() => { if (!closed) channel.subscribe(); }, 1500);
-      }
+    if (status === 'SUBSCRIBED') {
+      subscribed = true;
+      queue.splice(0).forEach(([payload, resolve]) =>
+        relaySend(name, payload).then(resolve)
+      );
+    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+      if (!closed) setTimeout(() => { if (!closed) channel.subscribe(); }, 1500);
     }
   });
   return {
     set onmessage(fn) { handler = fn; },
-    async postMessage(payload) { return relaySend(name, payload); },
+    async postMessage(payload) {
+      if (!subscribed) {
+        return new Promise(resolve => queue.push([payload, resolve]));
+      }
+      return relaySend(name, payload);
+    },
     close() { closed = true; sb.removeChannel(channel); }
   };
 }
@@ -264,10 +274,11 @@ function startHopSearch() {
   render();
   lobbyChan = makeChannel('wavelength-lobby');
   lobbyChan.onmessage = handleLobby;
+  // first looking is queued and sent once subscribed
   lobbyChan.postMessage({ type: 'looking', id: myId, fromName: myName });
   lookInterval = setInterval(() => {
     if (hopState === 'searching' && lobbyChan) lobbyChan.postMessage({ type: 'looking', id: myId, fromName: myName });
-  }, 1500);
+  }, 2000);
 }
 
 function handleLobby(e) {
@@ -284,7 +295,7 @@ function handleLobby(e) {
           pendingTarget = null;
           render();
         }
-      }, 5000);
+      }, 10000);
       lobbyChan.postMessage({ type: 'claim', to: m.id, from: myId, fromName: myName, room: pendingRoom });
     }
   }
