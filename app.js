@@ -252,7 +252,7 @@ function render() {
   if (!configured) {
     const banner = document.createElement('div');
     banner.className = 'setup-banner';
-    banner.innerHTML = `<span class="status-dot bad"></span> Config missing — set <code>supabaseUrl</code> &amp; <code>supabaseAnonKey</code> in <code>config.js</code>`;
+    banner.innerHTML = `<span class="status-dot bad"></span> Config missing — set <code>supabaseUrl</code> & <code>supabaseAnonKey</code> in <code>config.js</code>`;
     panel.prepend(banner);
   }
 }
