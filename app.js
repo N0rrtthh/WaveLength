@@ -44,6 +44,7 @@ const REACTION_EMOJIS = ['❤️', '😂', '👍', '🔥', '😮', '😢', '🎉
 const CHANNEL_NAME_RE = /^[a-z0-9_-]{1,64}$/;
 // selfEcho=true only for lobby so both sides see looking/claim messages
 function makeChannel(name, selfEcho = false) {
+  if (!sb) return null;
   if (!CHANNEL_NAME_RE.test(name)) { console.error('Invalid channel name:', name); return null; }
   const channel = sb.channel(name, { config: { broadcast: { self: selfEcho, ack: false } } });
   let handler = null;
@@ -252,7 +253,10 @@ function render() {
   if (!configured) {
     const banner = document.createElement('div');
     banner.className = 'setup-banner';
-    banner.innerHTML = `<span class="status-dot bad"></span> Config missing — set <code>supabaseUrl</code> & <code>supabaseAnonKey</code> in <code>config.js</code>`;
+    const dot = document.createElement('span');
+    dot.className = 'status-dot bad';
+    banner.appendChild(dot);
+    banner.appendChild(document.createTextNode(' Config missing — set supabaseUrl & supabaseAnonKey in config.js'));
     panel.prepend(banner);
   }
 }
@@ -284,6 +288,7 @@ function renderHopSearching() {
 }
 
 function startHopSearch() {
+  if (!sb) { pushSystemMsg('Not configured — add your Supabase keys to config.js.'); return; }
   hopState = 'searching';
   render();
   lobbyChan = makeChannel('wavelength-lobby', true);
@@ -445,6 +450,7 @@ function renderChannelList() {
 }
 
 function joinChannel(name) {
+  if (!sb) { return; }
   if (typeof name !== 'string' || !CHANNEL_NAME_RE.test(name)) return;
   currentChannelName = name;
   if (!channelMembers.has(name)) channelMembers.set(name, new Set());
