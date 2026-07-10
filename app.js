@@ -1,14 +1,9 @@
 const SUPABASE_URL = window.WAVELENGTH_CONFIG?.supabaseUrl ?? '';
 function getAnonKey() { return window.WAVELENGTH_CONFIG?.supabaseAnonKey ?? ''; }
 
-const DEV_MODE = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-const RELAY_URL = DEV_MODE
-  ? null
-  : `${SUPABASE_URL}/functions/v1/relay`;
-
 const configured = SUPABASE_URL.startsWith('https://') && getAnonKey().length > 20;
 const sb = configured ? window.supabase.createClient(SUPABASE_URL, getAnonKey(), {
-  realtime: { params: { eventsPerSecond: 10 } }
+  realtime: { params: { eventsPerSecond: 20 } }
 }) : null;
 
 function updateStatus(ok, msg) {
@@ -35,46 +30,22 @@ monitorConnection();
 
 const REACTION_EMOJIS = ['❤️', '😂', '👍', '🔥', '😮', '😢', '🎉'];
 
-async function relaySend(channel, payload) {
-  if (DEV_MODE) {
-    const ch = sb.channel(channel);
-    try {
-      await ch.send({ type: 'broadcast', event: 'data', payload: { ...payload, _serverVerified: true } });
-    } catch { return 'error'; }
-    return 'ok';
-  }
-  try {
-    const res = await fetch(RELAY_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getAnonKey()}`,
-      },
-      body: JSON.stringify({ channel, payload }),
-    });
-    if (res.status === 429) return 'rate-limited';
-    if (!res.ok) return 'error';
-    return 'ok';
-  } catch { return 'error'; }
-}
-
 const CHANNEL_NAME_RE = /^[a-z0-9_-]{1,64}$/;
 function makeChannel(name) {
   if (!CHANNEL_NAME_RE.test(name)) { console.error('Invalid channel name:', name); return null; }
-  const channel = sb.channel(name, { config: { broadcast: { self: DEV_MODE } } });
+  const channel = sb.channel(name, { config: { broadcast: { self: true, ack: false } } });
   let handler = null;
   let closed = false;
   let subscribed = false;
   const queue = [];
   channel.on('broadcast', { event: 'data' }, (msg) => {
-    if (handler && (DEV_MODE || msg.payload?._serverVerified === true))
-      handler({ data: msg.payload });
+    if (handler) handler({ data: msg.payload });
   });
   channel.subscribe((status) => {
     if (status === 'SUBSCRIBED') {
       subscribed = true;
-      queue.splice(0).forEach(([payload, resolve]) =>
-        relaySend(name, payload).then(resolve)
+      queue.splice(0).forEach(([p, res]) =>
+        channel.send({ type: 'broadcast', event: 'data', payload: p }).then(() => res('ok'))
       );
     } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
       if (!closed) setTimeout(() => { if (!closed) channel.subscribe(); }, 1500);
@@ -86,7 +57,10 @@ function makeChannel(name) {
       if (!subscribed) {
         return new Promise(resolve => queue.push([payload, resolve]));
       }
-      return relaySend(name, payload);
+      try {
+        await channel.send({ type: 'broadcast', event: 'data', payload });
+        return 'ok';
+      } catch { return 'error'; }
     },
     close() { closed = true; sb.removeChannel(channel); }
   };
