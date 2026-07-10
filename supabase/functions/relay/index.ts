@@ -92,12 +92,19 @@ Deno.serve(async (req) => {
     safePayload.add = payload.add === true;
   }
 
-  const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-  const { error } = await sb.channel(channel).send({
+  const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+    realtime: { params: { eventsPerSecond: 100 } },
+  });
+  const ch = sb.channel(channel);
+  await new Promise<void>((resolve) => {
+    ch.subscribe((status) => { if (status === 'SUBSCRIBED') resolve(); });
+  });
+  const { error } = await ch.send({
     type: 'broadcast',
     event: 'data',
     payload: safePayload,
   });
+  await sb.removeChannel(ch);
 
   if (error) return new Response('Relay error', { status: 502 });
   return new Response('OK', { status: 200 });
