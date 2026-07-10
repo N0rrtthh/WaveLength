@@ -3,24 +3,9 @@ function getAnonKey() { return window.WAVELENGTH_CONFIG?.supabaseAnonKey ?? ''; 
 
 const configured = SUPABASE_URL.startsWith('https://') && getAnonKey().length > 20;
 const sb = configured ? window.supabase.createClient(SUPABASE_URL, getAnonKey(), {
-  realtime: {
-    params: { eventsPerSecond: 20 },
-  },
+  realtime: { params: { eventsPerSecond: 20 } },
   auth: { persistSession: false },
 }) : null;
-
-// Test that realtime broadcast works between two clients
-if (sb) {
-  const testCh = sb.channel('wl-test', { config: { broadcast: { self: false } } });
-  testCh.on('broadcast', { event: 'ping' }, (m) => console.log('[WL] broadcast test RECEIVED:', m));
-  testCh.subscribe((s) => {
-    console.log('[WL] test channel status:', s);
-    if (s === 'SUBSCRIBED') {
-      testCh.send({ type: 'broadcast', event: 'ping', payload: { hello: 'world', ts: Date.now() } })
-        .then(r => console.log('[WL] test send result:', r));
-    }
-  });
-}
 
 function updateStatus(ok, msg) {
   const dot = document.getElementById('connStatus');
@@ -56,11 +41,9 @@ function makeChannel(name, selfEcho = false) {
   let subscribed = false;
   const queue = [];
   channel.on('broadcast', { event: 'data' }, (msg) => {
-    console.log('[WL] recv', name, JSON.stringify(msg.payload));
     if (handler) handler({ data: msg.payload });
   });
   channel.subscribe((status) => {
-    console.log('[WL] sub', name, status);
     if (status === 'SUBSCRIBED') {
       subscribed = true;
       queue.splice(0).forEach(([p, res]) =>
@@ -78,9 +61,8 @@ function makeChannel(name, selfEcho = false) {
       }
       try {
         const res = await channel.send({ type: 'broadcast', event: 'data', payload });
-        console.log('[WL] send', name, payload.type, res);
         return 'ok';
-      } catch(e) { console.error('[WL] send err', e); return 'error'; }
+      } catch(e) { return 'error'; }
     },
     close() { closed = true; sb.removeChannel(channel); }
   };
@@ -309,6 +291,7 @@ function handleLobby(e) {
     if (hopState === 'pending') {
       hopState = 'matched';
       takenIds.add(myId);
+      pairRoom = pendingRoom;
       pairPeerName = sanitizeName(m.fromName);
       lobbyChan.postMessage({ type: 'claimed', id: myId });
       closeLobby();
@@ -327,7 +310,6 @@ function connectPair() {
   startHeartbeat(pairChan, true);
   pairChan.onmessage = (e) => {
     const m = e.data;
-    console.log('[WL] pairHandler', JSON.stringify(m), 'myId=', myId);
     if (m.type === 'heartbeat' && m.from !== myId) { lastPeerHeard = Date.now(); if (peerDead && hbIsPair) recoverPeer(); return; }
     if (m.from === myId) return;
     if (m.type === 'msg' && typeof m.text === 'string') appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id);
