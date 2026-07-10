@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         messages: [{
-          topic: channel,
+          topic: `realtime:${channel}`,
           event: 'data',
           payload: safePayload,
         }],
