@@ -1,13 +1,9 @@
-// Credentials are loaded from config.js (gitignored) — never hardcoded here.
-// See config.example.js for the required shape.
 const SUPABASE_URL = window.WAVELENGTH_CONFIG?.supabaseUrl ?? '';
 function getAnonKey() { return window.WAVELENGTH_CONFIG?.supabaseAnonKey ?? ''; }
 
-// DEV_MODE: true when running on localhost — bypasses relay, uses direct broadcast
-// In production this is always false (relay is enforced)
 const DEV_MODE = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 const RELAY_URL = DEV_MODE
-  ? null  // direct broadcast in dev
+  ? null
   : `${SUPABASE_URL}/functions/v1/relay`;
 
 const configured = SUPABASE_URL.startsWith('https://') && getAnonKey().length > 20;
@@ -15,7 +11,6 @@ const sb = configured ? window.supabase.createClient(SUPABASE_URL, getAnonKey(),
   realtime: { params: { eventsPerSecond: 10 } }
 }) : null;
 
-// ---------- connection status ----------
 function updateStatus(ok, msg) {
   const dot = document.getElementById('connStatus');
   if (!dot) return;
@@ -23,15 +18,23 @@ function updateStatus(ok, msg) {
   dot.style.background = ok ? 'var(--teal)' : 'var(--signal)';
   dot.style.boxShadow = ok ? '0 0 6px var(--teal)' : 'none';
 }
-if (sb) {
+
+function monitorConnection() {
+  if (!sb) return;
+  try { if (typeof sb.realtime.onOpen === 'function') sb.realtime.onOpen(() => updateStatus(true, 'Connected')); } catch {}
+  try { if (typeof sb.realtime.onClose === 'function') sb.realtime.onClose(() => updateStatus(false, 'Disconnected')); } catch {}
+  try { if (typeof sb.realtime.onError === 'function') sb.realtime.onError(() => updateStatus(false, 'Connection error')); } catch {}
   const probe = sb.channel('wavelength-probe');
   probe.subscribe(status => {
-    if (status === 'SUBSCRIBED') { updateStatus(true, 'Connected'); sb.removeChannel(probe); }
+    if (status === 'SUBSCRIBED') updateStatus(true, 'Connected');
     else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') updateStatus(false, 'Connection failed');
   });
 }
 
-// ---------- relay send ----------
+monitorConnection();
+
+const REACTION_EMOJIS = ['❤️', '😂', '👍', '🔥', '😮', '😢', '🎉'];
+
 async function relaySend(channel, payload) {
   if (DEV_MODE) {
     const ch = sb.channel(channel);
@@ -55,10 +58,7 @@ async function relaySend(channel, payload) {
   } catch { return 'error'; }
 }
 
-// ---------- channel ----------
 const CHANNEL_NAME_RE = /^[a-z0-9_-]{1,64}$/;
-// self:true in DEV_MODE so each tab sees its own sends (no relay to echo them back)
-// self:false in production — relay broadcasts server-side to all subscribers
 function makeChannel(name) {
   if (!CHANNEL_NAME_RE.test(name)) { console.error('Invalid channel name:', name); return null; }
   const channel = sb.channel(name, { config: { broadcast: { self: DEV_MODE } } });
@@ -71,7 +71,6 @@ function makeChannel(name) {
   channel.subscribe((status) => {
     if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
       if (!closed) {
-        // Auto-reconnect once on failure
         setTimeout(() => { if (!closed) channel.subscribe(); }, 1500);
       }
     }
@@ -83,17 +82,18 @@ function makeChannel(name) {
   };
 }
 
-// ---------- identity ----------
-const ADJ = ['Quiet','Faint','Static','Distant','Hollow','Loose','Idle','Pale','Drift','Low','Odd','Blank','Grey','Slow','Faded'];
-const NOUN = ['Signal','Echo','Frequency','Ghost','Wire','Channel','Pulse','Radio','Wave','Node','Static','Relay','Beacon'];
+const ADJ = ['Quiet', 'Faint', 'Static', 'Distant', 'Hollow', 'Loose', 'Idle', 'Pale', 'Drift', 'Low', 'Odd', 'Blank', 'Grey', 'Slow', 'Faded'];
+const NOUN = ['Signal', 'Echo', 'Frequency', 'Ghost', 'Wire', 'Channel', 'Pulse', 'Radio', 'Wave', 'Node', 'Static', 'Relay', 'Beacon'];
 function genCallsign() {
-  return `${ADJ[Math.floor(Math.random()*ADJ.length)]}${NOUN[Math.floor(Math.random()*NOUN.length)]}-${Math.floor(Math.random()*90+10)}`;
+  return `${ADJ[Math.floor(Math.random() * ADJ.length)]}${NOUN[Math.floor(Math.random() * NOUN.length)]}-${Math.floor(Math.random() * 90 + 10)}`;
 }
 
-const myId = Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2,'0')).join('');
+function randHex(n) {
+  return Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('');
+}
+const myId = randHex(8);
 let myName = genCallsign();
 
-// ---------- landing ----------
 const landingNameInput = document.getElementById('landingNameInput');
 landingNameInput.value = myName;
 landingNameInput.oninput = () => { const v = sanitizeName(landingNameInput.value); if (v) myName = v; };
@@ -115,7 +115,6 @@ document.getElementById('homeBtn').onclick = () => {
   landingNameInput.value = myName;
 };
 
-// ---------- client-side rate limiter (secondary guard — primary is Edge Function) ----------
 const _sendTimes = [];
 function isRateLimited() {
   const now = Date.now();
@@ -125,7 +124,6 @@ function isRateLimited() {
   return false;
 }
 
-// ---------- send sound (singleton AudioContext — no handle leak) ----------
 let _audioCtx = null;
 function getAudioCtx() {
   if (!_audioCtx || _audioCtx.state === 'closed')
@@ -143,12 +141,9 @@ function playClick() {
     g.gain.setValueAtTime(0.18, ctx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
     o.start(); o.stop(ctx.currentTime + 0.12);
-  } catch(e) {}
+  } catch (e) {}
 }
 
-function setNameLocked(_locked) { /* name is display-only */ }
-
-// ---------- unread badge ----------
 let unreadCount = 0;
 const baseTitle = document.title;
 function flashUnread() {
@@ -158,11 +153,12 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { unreadCount = 0; document.title = baseTitle; }
 });
 
-// ---------- state ----------
 let mode = 'hop';
 let hopState = 'idle';
-let queueChan = null, pairChan = null, pairPeerName = null, pairRoom = null;
+let lobbyChan = null, pairChan = null, pairPeerName = null, pairRoom = null;
+let pendingTarget = null, pendingRoom = null, pendingTimer = null, lookInterval = null;
 let channelChan = null, currentChannelName = null;
+const takenIds = new Set();
 
 const ROOMS = [
   { name: 'general',     tag: 'anything goes' },
@@ -171,27 +167,50 @@ const ROOMS = [
   { name: 'vent',        tag: 'get it out' },
   { name: 'study-hall',  tag: 'quiet company' },
 ];
+const customRooms = [];
+
+const msgState = new Map();
+const rowByMid = new Map();
 
 const panel = document.getElementById('panel');
 
 const VALID_MODES = new Set(['hop', 'channels']);
-document.querySelectorAll('.tab').forEach(t => {
-  t.onclick = () => {
-    const m = t.dataset.mode;
-    if (!VALID_MODES.has(m)) return;
-    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-    t.classList.add('active');
-    mode = m;
-    leaveEverything();
-    render();
+const tabs = [...document.querySelectorAll('.tab')];
+tabs.forEach((t, i) => {
+  t.onclick = () => activateTab(t.dataset.mode);
+  t.onkeydown = (e) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const dir = e.key === 'ArrowRight' ? 1 : -1;
+      const next = tabs[(i + dir + tabs.length) % tabs.length];
+      next.focus();
+      activateTab(next.dataset.mode);
+    }
   };
 });
+function activateTab(m) {
+  if (!VALID_MODES.has(m)) return;
+  tabs.forEach(x => x.classList.remove('active'));
+  tabs.find(x => x.dataset.mode === m).classList.add('active');
+  mode = m;
+  leaveEverything();
+  render();
+}
+
+function closeLobby() {
+  if (lookInterval) { clearInterval(lookInterval); lookInterval = null; }
+  if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
+  if (lobbyChan) { lobbyChan.close(); lobbyChan = null; }
+}
 
 function leaveEverything() {
-  if (queueChan) { queueChan.close(); queueChan = null; }
-  if (pairChan)  { pairChan.close();  pairChan = null; }
+  stopHeartbeat();
+  closeLobby();
+  if (pairChan) { pairChan.close(); pairChan = null; }
   if (channelChan) { channelChan.close(); channelChan = null; }
-  hopState = 'idle'; pairPeerName = null; pairRoom = null; currentChannelName = null;
+  hopState = 'idle'; pairPeerName = null; pairRoom = null;
+  pendingTarget = null; pendingRoom = null;
+  currentChannelName = null;
 }
 
 function render() {
@@ -200,21 +219,20 @@ function render() {
     panel.innerHTML = `
       <div class="setup-gate">
         <h2><span class="status-dot bad"></span>Not connected yet</h2>
-        <p>Set <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> in app.js. Deploy the relay Edge Function. No tables needed — Realtime Broadcast only.</p>
+        <p>Set <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> in config.js. Deploy the relay Edge Function. No tables needed — Realtime Broadcast only.</p>
       </div>`;
     return;
   }
   if (mode === 'hop') {
-    if (hopState === 'idle')       renderHopIdle();
-    else if (hopState === 'searching' || hopState === 'pairing') renderHopSearching();
-    else if (hopState === 'matched')   renderChat({ peer: pairPeerName, onLeave: leaveHop });
+    if (hopState === 'idle') renderHopIdle();
+    else if (hopState === 'searching' || hopState === 'pending') renderHopSearching();
+    else if (hopState === 'matched') renderChat({ peer: pairPeerName, onLeave: leaveHop });
   } else {
     if (currentChannelName) renderChat({ peer: '#' + currentChannelName, onLeave: leaveChannel, isChannel: true });
     else renderChannelList();
   }
 }
 
-// ---------- Frequency Hop ----------
 function renderHopIdle() {
   panel.innerHTML = `
     <div class="hop-idle">
@@ -226,7 +244,7 @@ function renderHopIdle() {
         </svg>
       </div>
       <p>Get matched with a random stranger for a one-on-one, no-names conversation. Leave anytime — nothing is saved.</p>
-      <button class="btn-primary" id="findBtn">Search for a signal</button>
+      <button class="btn-primary" id="findBtn" type="button">Search for a signal</button>
     </div>`;
   document.getElementById('findBtn').onclick = startHopSearch;
 }
@@ -235,8 +253,8 @@ function renderHopSearching() {
   panel.innerHTML = `
     <div class="hop-idle">
       <div class="searching-pulse"></div>
-      <p>Scanning for another open frequency…</p>
-      <button class="btn-ghost" id="cancelBtn">Cancel</button>
+      <p>${hopState === 'pending' ? 'Found a signal — connecting…' : 'Scanning for another open frequency…'}</p>
+      <button class="btn-ghost" id="cancelBtn" type="button">Cancel</button>
     </div>`;
   document.getElementById('cancelBtn').onclick = () => leaveHop();
 }
@@ -244,53 +262,74 @@ function renderHopSearching() {
 function startHopSearch() {
   hopState = 'searching';
   render();
-  queueChan = makeChannel('wavelength-queue');
-  queueChan.onmessage = (e) => {
-    const msg = e.data;
-    if (msg.type === 'looking' && msg.id !== myId && hopState === 'searching') {
-      // Only the lower ID initiates — prevents both sides pairing simultaneously
-      if (myId < msg.id) {
-        hopState = 'pairing';
-        pairRoom = 'wavelength-pair-' + [myId, msg.id].sort().join('-');
-        queueChan.postMessage({ type: 'pair', to: msg.id, from: myId, fromName: myName, room: pairRoom });
-      }
+  lobbyChan = makeChannel('wavelength-lobby');
+  lobbyChan.onmessage = handleLobby;
+  lobbyChan.postMessage({ type: 'looking', id: myId, fromName: myName });
+  lookInterval = setInterval(() => {
+    if (hopState === 'searching' && lobbyChan) lobbyChan.postMessage({ type: 'looking', id: myId, fromName: myName });
+  }, 1500);
+}
+
+function handleLobby(e) {
+  const m = e.data;
+  if (m.type === 'looking' && m.id && m.id !== myId) {
+    if (takenIds.has(m.id)) return;
+    if (hopState === 'searching' && myId < m.id && !pendingTarget) {
+      hopState = 'pending';
+      pendingTarget = m.id;
+      pendingRoom = 'wavelength-pair-' + [myId, m.id].sort().join('-');
+      pendingTimer = setTimeout(() => {
+        if (hopState === 'pending') {
+          hopState = 'searching';
+          pendingTarget = null;
+          render();
+        }
+      }, 5000);
+      lobbyChan.postMessage({ type: 'claim', to: m.id, from: myId, fromName: myName, room: pendingRoom });
     }
-    if (msg.type === 'pair' && msg.to === myId && hopState === 'searching') {
-      if (typeof msg.room !== 'string' || !CHANNEL_NAME_RE.test(msg.room)) return;
-      hopState = 'pairing';
-      pairRoom = msg.room;
-      pairPeerName = sanitizeName(msg.fromName);
-      // Close queue before ack so we stop receiving new 'looking' messages
-      const q = queueChan; queueChan = null;
-      q.postMessage({ type: 'pair-ack', to: msg.from, from: myId, fromName: myName });
-      q.close();
+  }
+  if (m.type === 'claim' && m.to === myId) {
+    if (hopState === 'searching') {
+      hopState = 'matched';
+      takenIds.add(myId);
+      pairRoom = m.room;
+      pairPeerName = sanitizeName(m.fromName);
+      lobbyChan.postMessage({ type: 'claim-ack', to: m.from, from: myId, fromName: myName });
+      lobbyChan.postMessage({ type: 'claimed', id: myId });
+      closeLobby();
       connectPair();
     }
-    if (msg.type === 'pair-ack' && msg.to === myId && hopState === 'pairing') {
-      pairPeerName = sanitizeName(msg.fromName);
+  }
+  if (m.type === 'claim-ack' && m.to === myId) {
+    if (hopState === 'pending') {
+      hopState = 'matched';
+      takenIds.add(myId);
+      pairPeerName = sanitizeName(m.fromName);
+      lobbyChan.postMessage({ type: 'claimed', id: myId });
+      closeLobby();
       connectPair();
     }
-  };
-  queueChan.postMessage({ type: 'looking', id: myId });
-  const iv = setInterval(() => {
-    if (hopState !== 'searching') { clearInterval(iv); return; }
-    queueChan && queueChan.postMessage({ type: 'looking', id: myId });
-  }, 700);
+  }
+  if (m.type === 'claimed' && typeof m.id === 'string') takenIds.add(m.id);
 }
 
 function connectPair() {
   hopState = 'matched';
-  if (queueChan) { queueChan.close(); queueChan = null; }
+  if (lobbyChan) { lobbyChan.close(); lobbyChan = null; }
   pairChan = makeChannel(pairRoom);
   render();
   pushSystemMsg(`Connected to ${pairPeerName}.`);
+  startHeartbeat(pairChan, true);
   pairChan.onmessage = (e) => {
-    const msg = e.data;
-    if (msg.type === 'msg' && msg.from !== myId && typeof msg.text === 'string')
-      appendMsg(msg.text.slice(0, 500), 'them');
-    if (msg.type === 'typing' && msg.from !== myId)
-      setTyping(pairPeerName, msg.state === true);
-    if (msg.type === 'leave' && msg.from !== myId) {
+    const m = e.data;
+    lastPeerHeard = Date.now();
+    if (peerDead && hbIsPair) recoverPeer();
+    if (m.type === 'msg' && m.from !== myId && typeof m.text === 'string') appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id);
+    else if (m.type === 'typing' && m.from !== myId) setTyping(pairPeerName, m.state === true);
+    else if (m.type === 'heartbeat') { /* handled above */ }
+    else if (m.type === 'react' && m.mid) applyReaction(m.mid, m.emoji, m.from, m.add === true);
+    else if (m.type === 'leave' && m.from !== myId) {
+      stopHeartbeat();
       setTyping('', false);
       pushSystemMsg(`${pairPeerName} disconnected.`);
       if (pairChan) { pairChan.close(); pairChan = null; }
@@ -302,45 +341,63 @@ function connectPair() {
 
 function leaveHop() {
   if (pairChan) { pairChan.postMessage({ type: 'leave', from: myId }); pairChan.close(); pairChan = null; }
-  if (queueChan) { queueChan.close(); queueChan = null; }
-  hopState = 'idle'; pairPeerName = null;
+  closeLobby();
+  stopHeartbeat();
+  hopState = 'idle';
+  pairPeerName = null;
   render();
 }
 
-// ---------- Channels ----------
 function renderChannelList() {
-  panel.innerHTML = `<div class="channel-list">${ROOMS.map(r => `
-    <div class="channel-item" data-room="${r.name}">
-      <div>
-        <div class="name">#${r.name}</div>
-        <div class="tag">${r.tag}</div>
-      </div>
-      <span class="active-dot" style="opacity:0"></span>
-    </div>`).join('')}</div>`;
-  panel.querySelectorAll('.channel-item').forEach(el => {
-    el.onclick = () => joinChannel(el.dataset.room);
+  panel.innerHTML = '';
+  const list = document.createElement('div');
+  list.className = 'channel-list';
+  [...ROOMS, ...customRooms].forEach(r => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'channel-item';
+    b.innerHTML = `<div><div class="name">#${escapeHtml(r.name)}</div><div class="tag">${escapeHtml(r.tag || 'custom room')}</div></div><span class="active-dot" style="opacity:0"></span>`;
+    b.onclick = () => joinChannel(r.name);
+    list.appendChild(b);
   });
+  panel.appendChild(list);
+
+  const box = document.createElement('div');
+  box.className = 'room-create';
+  box.innerHTML = `<input id="newRoomInput" type="text" placeholder="Create or join a room…" maxlength="64" autocomplete="off" aria-label="Room name"><button id="newRoomBtn" class="btn-ghost" type="button">Go</button>`;
+  panel.appendChild(box);
+  const input = box.querySelector('#newRoomInput');
+  const go = () => {
+    const name = input.value.trim().toLowerCase();
+    if (!CHANNEL_NAME_RE.test(name)) { input.classList.add('warn'); return; }
+    if (!customRooms.some(c => c.name === name) && !ROOMS.some(r => r.name === name))
+      customRooms.push({ name, tag: 'custom room' });
+    joinChannel(name);
+  };
+  box.querySelector('#newRoomBtn').onclick = go;
+  input.onkeydown = (e) => { if (e.key === 'Enter') go(); };
 }
 
 function joinChannel(name) {
-  if (!ROOMS.some(r => r.name === name)) return;
+  if (typeof name !== 'string' || !CHANNEL_NAME_RE.test(name)) return;
   currentChannelName = name;
   channelChan = makeChannel('wavelength-room-' + name);
   if (!channelChan) return;
   render();
   pushSystemMsg(`You joined #${escapeHtml(name)} as ${escapeHtml(myName)}.`);
+  startHeartbeat(channelChan, false);
   channelChan.onmessage = (e) => {
-    const msg = e.data;
-    if (msg.type === 'msg' && msg.from !== myId && typeof msg.text === 'string')
-      appendMsg(msg.text.slice(0, 500), 'them', sanitizeName(msg.fromName));
-    if (msg.type === 'typing' && msg.from !== myId)
-      setTyping(sanitizeName(msg.fromName), msg.state === true);
-    if (msg.type === 'join' && msg.from !== myId)
-      pushSystemMsg(`${sanitizeName(msg.fromName)} joined.`);
-    if (msg.type === 'leave' && msg.from !== myId) {
-      setTyping(sanitizeName(msg.fromName), false);
-      pushSystemMsg(`${sanitizeName(msg.fromName)} left.`);
+    const m = e.data;
+    lastPeerHeard = Date.now();
+    if (m.type === 'msg' && m.from !== myId && typeof m.text === 'string')
+      appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id);
+    else if (m.type === 'typing' && m.from !== myId) setTyping(sanitizeName(m.fromName), m.state === true);
+    else if (m.type === 'join' && m.from !== myId) pushSystemMsg(`${sanitizeName(m.fromName)} joined.`);
+    else if (m.type === 'leave' && m.from !== myId) {
+      setTyping(sanitizeName(m.fromName), false);
+      pushSystemMsg(`${sanitizeName(m.fromName)} left.`);
     }
+    else if (m.type === 'react' && m.mid) applyReaction(m.mid, m.emoji, m.from, m.add === true);
   };
   channelChan.postMessage({ type: 'join', from: myId, fromName: myName });
 }
@@ -350,33 +407,64 @@ function leaveChannel() {
     channelChan.postMessage({ type: 'leave', from: myId, fromName: myName });
     channelChan.close(); channelChan = null;
   }
+  stopHeartbeat();
   currentChannelName = null;
   render();
 }
 
-// ---------- shared chat UI ----------
+let hbInterval = null, hbWatch = null, hbIsPair = false, lastPeerHeard = 0, peerDead = false;
+function startHeartbeat(chan, isPair) {
+  stopHeartbeat();
+  hbIsPair = isPair;
+  lastPeerHeard = Date.now();
+  peerDead = false;
+  hbInterval = setInterval(() => { if (chan) chan.postMessage({ type: 'heartbeat', from: myId }); }, 4000);
+  hbWatch = setInterval(() => { if (hbIsPair && !peerDead && Date.now() - lastPeerHeard > 12000) onPeerDead(); }, 4000);
+}
+function stopHeartbeat() {
+  if (hbInterval) clearInterval(hbInterval);
+  if (hbWatch) clearInterval(hbWatch);
+  hbInterval = hbWatch = null;
+  hbIsPair = false;
+}
+function onPeerDead() {
+  peerDead = true;
+  pushSystemMsg(`${pairPeerName} disconnected.`);
+  disableComposer();
+  showDisconnectedBar();
+  const dot = document.querySelector('.online-dot');
+  if (dot) { dot.style.background = 'var(--text-dim)'; dot.style.boxShadow = 'none'; }
+}
+function recoverPeer() {
+  peerDead = false;
+  removeDisconnectedBar();
+  pushSystemMsg(`${pairPeerName} reconnected.`);
+  const dot = document.querySelector('.online-dot');
+  if (dot) { dot.style.background = 'var(--teal)'; dot.style.boxShadow = '0 0 5px var(--teal)'; }
+}
+
 function renderChat({ peer, onLeave, isChannel }) {
   const safePeer = escapeHtml(peer);
   panel.innerHTML = `
     <div class="chat-header">
       <span class="who"><span class="online-dot"></span>${safePeer}</span>
     </div>
-    <div class="msgs" id="msgs"></div>
-    <button class="scroll-btn" id="scrollBtn">↓</button>
+    <div class="msgs" id="msgs" role="log" aria-live="polite"></div>
+    <button class="scroll-btn" id="scrollBtn" type="button">↓</button>
     <div class="typing-indicator" id="typingEl"></div>
     <div class="composer">
-      <button class="btn-leave" id="leaveBtn">Leave</button>
+      <button class="btn-leave" id="leaveBtn" type="button">Leave</button>
       <input id="msgInput" type="text" placeholder="Say something…" maxlength="500" autocomplete="off">
-      <button class="btn-send" id="sendBtn" disabled>Send</button>
+      <button class="btn-send" id="sendBtn" type="button" disabled>Send</button>
     </div>
     <div class="char-count" id="charCount"></div>`;
 
   document.getElementById('leaveBtn').onclick = () => showConfirmBar(onLeave);
 
-  const input   = document.getElementById('msgInput');
+  const input = document.getElementById('msgInput');
   const sendBtn = document.getElementById('sendBtn');
   const charCount = document.getElementById('charCount');
-  const msgsEl  = document.getElementById('msgs');
+  const msgsEl = document.getElementById('msgs');
 
   let iAmTyping = false, typingDebounceTimer = null;
   function sendTypingState(state) {
@@ -399,15 +487,14 @@ function renderChat({ peer, onLeave, isChannel }) {
     }
     clearTimeout(typingDebounceTimer);
     typingDebounceTimer = setTimeout(() => {
-      if (hasText && !iAmTyping)       { iAmTyping = true;  sendTypingState(true); }
-      else if (!hasText && iAmTyping)  { iAmTyping = false; sendTypingState(false); }
+      if (hasText && !iAmTyping) { iAmTyping = true; sendTypingState(true); }
+      else if (!hasText && iAmTyping) { iAmTyping = false; sendTypingState(false); }
     }, 500);
   };
 
-  // emoji picker
-  const EMOJIS = ['😂','❤️','😭','🔥','👀','💀','😍','🤣','😊','🥺','✨','😅','🙏','😩','😤','🤔','💯','🎉','👏','🫡'];
   const emojiBtn = document.createElement('button');
-  emojiBtn.className = 'emoji-btn'; emojiBtn.textContent = '😊'; emojiBtn.title = 'Emoji'; emojiBtn.type = 'button';
+  emojiBtn.type = 'button';
+  emojiBtn.className = 'emoji-btn'; emojiBtn.textContent = '😊'; emojiBtn.title = 'Emoji';
   const composer = panel.querySelector('.composer');
   composer.style.position = 'relative';
   composer.insertBefore(emojiBtn, input);
@@ -416,8 +503,9 @@ function renderChat({ peer, onLeave, isChannel }) {
     e.stopPropagation();
     if (tray) { tray.remove(); tray = null; return; }
     tray = document.createElement('div'); tray.className = 'emoji-tray';
-    EMOJIS.forEach(em => {
-      const s = document.createElement('span'); s.textContent = em;
+    REACTION_EMOJIS.forEach(em => {
+      const s = document.createElement('button');
+      s.type = 'button'; s.textContent = em;
       s.onclick = () => { input.value += em; input.dispatchEvent(new Event('input')); tray.remove(); tray = null; input.focus(); };
       tray.appendChild(s);
     });
@@ -438,13 +526,13 @@ function renderChat({ peer, onLeave, isChannel }) {
     }
     if (iAmTyping) { iAmTyping = false; sendTypingState(false); }
     playClick();
-    appendMsg(text, 'me');
+    const mid = randHex(8);
+    appendMsg(text, 'me', undefined, mid);
     let result;
     if (mode === 'hop' && pairChan)
-      result = await pairChan.postMessage({ type: 'msg', from: myId, text });
+      result = await pairChan.postMessage({ type: 'msg', from: myId, fromName: myName, text, id: mid });
     else if (mode === 'channels' && channelChan)
-      result = await channelChan.postMessage({ type: 'msg', from: myId, fromName: myName, text });
-    // If server rate-limited, show feedback and undo the optimistic append
+      result = await channelChan.postMessage({ type: 'msg', from: myId, fromName: myName, text, id: mid });
     if (result === 'rate-limited') {
       const warn = document.createElement('div');
       warn.className = 'msg system'; warn.style.color = 'var(--signal)';
@@ -462,9 +550,10 @@ function renderChat({ peer, onLeave, isChannel }) {
 }
 
 function showDisconnectedBar() {
+  if (document.getElementById('discBar')) return;
   const bar = document.createElement('div');
-  bar.className = 'disconnected-bar';
-  bar.innerHTML = `<span>Signal lost.</span><div class="dbar-btns"><button class="dbar-next" id="dbarNext">Find new</button><button class="dbar-menu" id="dbarMenu">Main menu</button></div>`;
+  bar.className = 'disconnected-bar'; bar.id = 'discBar';
+  bar.innerHTML = `<span>Signal lost.</span><div class="dbar-btns"><button class="dbar-next" id="dbarNext" type="button">Find new</button><button class="dbar-menu" id="dbarMenu" type="button">Main menu</button></div>`;
   const charCount = document.getElementById('charCount');
   if (charCount) charCount.after(bar);
   document.getElementById('dbarNext').onclick = () => { leaveHop(); startHopSearch(); };
@@ -472,13 +561,17 @@ function showDisconnectedBar() {
   const dot = document.querySelector('.online-dot');
   if (dot) { dot.style.background = 'var(--text-dim)'; dot.style.boxShadow = 'none'; }
 }
+function removeDisconnectedBar() {
+  const bar = document.getElementById('discBar');
+  if (bar) bar.remove();
+}
 
 function showConfirmBar(onConfirm) {
   const existing = document.getElementById('confirmBar');
   if (existing) { existing.remove(); return; }
   const bar = document.createElement('div');
   bar.className = 'confirm-bar'; bar.id = 'confirmBar';
-  bar.innerHTML = `<span>Leave this chat?</span><div class="cbar-btns"><button class="cbar-yes" id="cbarYes">Leave</button><button class="cbar-no" id="cbarNo">Stay</button></div>`;
+  bar.innerHTML = `<span>Leave this chat?</span><div class="cbar-btns"><button class="cbar-yes" id="cbarYes" type="button">Leave</button><button class="cbar-no" id="cbarNo" type="button">Stay</button></div>`;
   document.getElementById('charCount').after(bar);
   document.getElementById('cbarYes').onclick = onConfirm;
   document.getElementById('cbarNo').onclick = () => bar.remove();
@@ -487,47 +580,129 @@ function showConfirmBar(onConfirm) {
 function setTyping(name, active) {
   const el = document.getElementById('typingEl');
   if (!el) return;
-  el.innerHTML = active ? `<div class="typing-bubble"><span></span><span></span><span></span></div>` : '';
+  el.innerHTML = active
+    ? `<div class="typing-bubble"><span></span><span></span><span></span></div><span class="typing-name">${escapeHtml(name || 'Someone')} is typing…</span>`
+    : '';
 }
 
 const MAX_MSG_DOM = 200;
-function appendMsg(text, who, label) {
+function appendMsg(text, who, label, mid) {
   const msgsEl = document.getElementById('msgs');
   if (!msgsEl) return;
   while (msgsEl.querySelectorAll('.msg-row:not(.system)').length >= MAX_MSG_DOM) {
     const oldest = msgsEl.querySelector('.msg-row:not(.system)');
-    if (oldest) oldest.remove(); else break;
+    if (oldest) {
+      const om = oldest.dataset.mid;
+      if (om) { msgState.delete(om); rowByMid.delete(om); }
+      oldest.remove();
+    } else break;
   }
   if (who === 'them') setTyping('', false);
   const atBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 40;
+  const safeWho = ['me', 'them', 'system'].includes(who) ? who : 'them';
   const row = document.createElement('div');
-  const safeWho = ['me','them','system'].includes(who) ? who : 'them';
   row.className = 'msg-row ' + safeWho;
+  if (mid) row.dataset.mid = mid;
   const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const initials = label ? label.slice(0,2).toUpperCase() : (pairPeerName ? pairPeerName.slice(0,2).toUpperCase() : '??');
-  const bubble = `<div class="msg ${safeWho}">${escapeHtml(text)}<div class="msg-meta">${safeWho === 'them' && label ? escapeHtml(label) + ' · ' : ''}${time}</div></div>`;
-  row.innerHTML = safeWho === 'them' ? `<div class="avatar">${initials}</div>${bubble}` : bubble;
+  const initials = label ? label.slice(0, 2).toUpperCase() : (pairPeerName ? pairPeerName.slice(0, 2).toUpperCase() : '??');
+  const bubble = document.createElement('div');
+  bubble.className = 'msg ' + safeWho;
+  const textEl = document.createElement('div');
+  textEl.className = 'msg-text';
+  textEl.textContent = text;
+  const meta = document.createElement('div');
+  meta.className = 'msg-meta';
+  meta.textContent = (safeWho === 'them' && label ? label + ' · ' : '') + time;
+  bubble.appendChild(textEl);
+  bubble.appendChild(meta);
+  if (mid) {
+    if (!msgState.has(mid)) msgState.set(mid, { reactions: new Map() });
+    const reactWrap = document.createElement('div');
+    reactWrap.className = 'msg-reactions';
+    const reactBtn = document.createElement('button');
+    reactBtn.type = 'button';
+    reactBtn.className = 'react-btn';
+    reactBtn.textContent = '🙂';
+    reactBtn.setAttribute('aria-label', 'Add reaction');
+    reactBtn.onclick = (e) => { e.stopPropagation(); openReactTray(mid, reactBtn); };
+    bubble.appendChild(reactWrap);
+    bubble.appendChild(reactBtn);
+    rowByMid.set(mid, row);
+  }
+  if (safeWho === 'them') {
+    const av = document.createElement('div');
+    av.className = 'avatar';
+    av.textContent = initials;
+    row.appendChild(av);
+  }
+  row.appendChild(bubble);
   msgsEl.appendChild(row);
   if (atBottom) msgsEl.scrollTop = msgsEl.scrollHeight;
   if (who === 'them') flashUnread();
+  if (mid) {
+    const st = msgState.get(mid);
+    if (st && st.reactions.size) renderReactions(mid);
+  }
+}
 
-  const QUICK_REACTIONS = ['❤️','😂','👍','🔥','😮'];
-  row.addEventListener('dblclick', () => {
-    let reactBar = row.querySelector('.msg-reactions');
-    if (!reactBar) { reactBar = document.createElement('div'); reactBar.className = 'msg-reactions'; row.querySelector('.msg').appendChild(reactBar); }
-    const pick = QUICK_REACTIONS[Math.floor(Math.random() * QUICK_REACTIONS.length)];
-    let chip = [...reactBar.querySelectorAll('.reaction-chip')].find(c => c.dataset.em === pick);
-    if (chip) {
-      chip.dataset.count = +chip.dataset.count + 1;
-      chip.querySelector('span').textContent = pick + ' ' + chip.dataset.count;
-      chip.classList.add('mine');
-    } else {
-      chip = document.createElement('div');
-      chip.className = 'reaction-chip mine'; chip.dataset.em = pick; chip.dataset.count = 1;
-      chip.innerHTML = `<span>${pick} 1</span>`;
-      reactBar.appendChild(chip);
-    }
+function renderReactions(mid) {
+  const row = rowByMid.get(mid);
+  if (!row) return;
+  const wrap = row.querySelector('.msg-reactions');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const st = msgState.get(mid);
+  if (!st) return;
+  for (const [emoji, set] of st.reactions) {
+    if (set.size === 0) continue;
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'reaction-chip' + (set.has(myId) ? ' mine' : '');
+    chip.textContent = emoji + (set.size > 1 ? ' ' + set.size : '');
+    chip.onclick = () => toggleReaction(mid, emoji);
+    wrap.appendChild(chip);
+  }
+}
+
+function toggleReaction(mid, emoji) {
+  const st = msgState.get(mid);
+  if (!st) return;
+  const set = st.reactions.get(emoji);
+  const has = set && set.has(myId);
+  const add = !has;
+  applyReaction(mid, emoji, myId, add);
+  const chan = mode === 'hop' ? pairChan : channelChan;
+  chan && chan.postMessage({ type: 'react', from: myId, emoji, mid, add });
+}
+
+function applyReaction(mid, emoji, fromId, add) {
+  let st = msgState.get(mid);
+  if (!st) { st = { reactions: new Map() }; msgState.set(mid, st); }
+  let set = st.reactions.get(emoji);
+  if (!set) { set = new Set(); st.reactions.set(emoji, set); }
+  if (add) set.add(fromId); else set.delete(fromId);
+  if (set.size === 0) st.reactions.delete(emoji);
+  renderReactions(mid);
+}
+
+function openReactTray(mid, btn) {
+  const old = document.getElementById('reactTray');
+  if (old) { old.remove(); return; }
+  const tray = document.createElement('div');
+  tray.id = 'reactTray';
+  tray.className = 'emoji-tray';
+  REACTION_EMOJIS.forEach(em => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = em;
+    b.onclick = (e) => { e.stopPropagation(); toggleReaction(mid, em); tray.remove(); };
+    tray.appendChild(b);
   });
+  btn.parentElement.appendChild(tray);
+  setTimeout(() => {
+    const close = () => { tray.remove(); document.removeEventListener('click', close, true); };
+    document.addEventListener('click', close, true);
+  }, 0);
 }
 
 function pushSystemMsg(text) {
@@ -549,16 +724,16 @@ function disableComposer() {
 
 function escapeHtml(s) {
   if (typeof s !== 'string') return '';
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
 }
 
 function sanitizeName(s) {
   if (typeof s !== 'string') return 'Unknown';
-  return s.replace(/[<>"'`]/g,'').trim().slice(0, 24) || 'Unknown';
+  return s.replace(/[^\w .\-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24) || 'Unknown';
 }
 
 window.addEventListener('beforeunload', () => {
-  if (pairChan)    pairChan.postMessage({ type: 'leave', from: myId });
+  if (pairChan) pairChan.postMessage({ type: 'leave', from: myId });
   if (channelChan) channelChan.postMessage({ type: 'leave', from: myId, fromName: myName });
 });
 

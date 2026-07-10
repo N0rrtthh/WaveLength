@@ -3,7 +3,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.4';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-// Server-side rate limit: 5 messages per 3 seconds per IP
 const ipWindows = new Map<string, number[]>();
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
@@ -14,7 +13,6 @@ function isRateLimited(ip: string): boolean {
   return false;
 }
 
-// Evict stale IP entries every 60s to prevent memory growth
 setInterval(() => {
   const now = Date.now();
   for (const [ip, times] of ipWindows) {
@@ -22,8 +20,14 @@ setInterval(() => {
   }
 }, 60_000);
 
-const ALLOWED_TYPES = new Set(['msg', 'typing', 'join', 'leave', 'looking', 'pair', 'pair-ack']);
+const ALLOWED_TYPES = new Set([
+  'msg', 'typing', 'join', 'leave',
+  'looking', 'claim', 'claim-ack', 'claimed', 'heartbeat', 'react',
+]);
+const ALLOWED_EMOJIS = new Set(['❤️', '😂', '👍', '🔥', '😮', '😢', '🎉']);
 const CHANNEL_RE = /^[a-z0-9_-]{1,64}$/;
+const HEX_RE = /^[a-f0-9]{1,64}$/;
+const MID_RE = /^[a-f0-9]{1,32}$/;
 const MAX_TEXT = 500;
 const MAX_NAME = 24;
 
@@ -32,8 +36,11 @@ function sanitizeName(s: unknown): string {
   return s.replace(/[<>"'`]/g, '').trim().slice(0, MAX_NAME) || 'Unknown';
 }
 
+function hex(s: unknown, max = 64): string {
+  return typeof s === 'string' && HEX_RE.test(s) ? s.slice(0, max) : '';
+}
+
 Deno.serve(async (req) => {
-  // Only accept POST
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
 
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown';
@@ -44,11 +51,8 @@ Deno.serve(async (req) => {
 
   const { channel, payload } = body as { channel?: unknown; payload?: Record<string, unknown> };
 
-  // Validate channel name
   if (typeof channel !== 'string' || !CHANNEL_RE.test(channel))
     return new Response('Invalid channel', { status: 400 });
-
-  // Validate payload shape
   if (!payload || typeof payload !== 'object')
     return new Response('Invalid payload', { status: 400 });
 
@@ -56,7 +60,6 @@ Deno.serve(async (req) => {
   if (typeof type !== 'string' || !ALLOWED_TYPES.has(type))
     return new Response('Invalid type', { status: 400 });
 
-  // Rate limit on msg type only (typing/join/leave are lower risk)
   let safeText = '';
   if (type === 'msg') {
     if (isRateLimited(ip)) return new Response('Rate limited', { status: 429 });
@@ -66,19 +69,28 @@ Deno.serve(async (req) => {
     if (!safeText) return new Response('Empty message', { status: 400 });
   }
 
-  // Build a clean output object from validated/sanitized fields only.
-  // All values are derived from explicit local variables, never from raw payload.
-  const safePayload: Record<string, unknown> = {
-    type,
-    _serverVerified: true,
-  };
-  if (typeof payload.from === 'string')     safePayload.from     = payload.from.slice(0, 64).replace(/[^a-f0-9]/g, '');
-  if (typeof payload.to === 'string')       safePayload.to       = payload.to.slice(0, 64).replace(/[^a-f0-9]/g, '');
-  if (typeof payload.id === 'string')       safePayload.id       = payload.id.slice(0, 64).replace(/[^a-f0-9]/g, '');
+  if (type === 'react') {
+    if (typeof payload.mid !== 'string' || !MID_RE.test(payload.mid))
+      return new Response('Invalid mid', { status: 400 });
+    if (typeof payload.emoji !== 'string' || !ALLOWED_EMOJIS.has(payload.emoji))
+      return new Response('Invalid emoji', { status: 400 });
+  }
+
+  const safePayload: Record<string, unknown> = { type, _serverVerified: true };
+  const from = hex(payload.from);
+  if (from) safePayload.from = from;
+  const to = hex(payload.to);
+  if (to) safePayload.to = to;
+  if (typeof payload.id === 'string' && HEX_RE.test(payload.id)) safePayload.id = payload.id;
   if (typeof payload.room === 'string' && CHANNEL_RE.test(payload.room)) safePayload.room = payload.room;
-  if (type === 'msg')                       safePayload.text     = safeText;
-  if (payload.fromName !== undefined)       safePayload.fromName = sanitizeName(payload.fromName);
-  if (type === 'typing')                    safePayload.state    = payload.state === true;
+  if (type === 'msg') safePayload.text = safeText;
+  if (payload.fromName !== undefined) safePayload.fromName = sanitizeName(payload.fromName);
+  if (type === 'typing') safePayload.state = payload.state === true;
+  if (type === 'react') {
+    safePayload.mid = payload.mid;
+    safePayload.emoji = payload.emoji;
+    safePayload.add = payload.add === true;
+  }
 
   const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
   const { error } = await sb.channel(channel).send({
