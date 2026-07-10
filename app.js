@@ -176,24 +176,20 @@ tabs.forEach((t, i) => {
 });
 function activateTab(m) {
   if (!VALID_MODES.has(m) || mode === m) return;
-  // If currently in a live chat, ask for confirmation before switching
-  const inHopChat = mode === 'hop' && hopState === 'matched';
+  const inHopChat = mode === 'hop' && (hopState === 'matched' || hopState === 'searching' || hopState === 'pending');
   const inChannel = mode === 'channels' && currentChannelName;
+  const doSwitch = () => {
+    tabs.forEach(x => x.classList.remove('active'));
+    tabs.find(x => x.dataset.mode === m).classList.add('active');
+    mode = m;
+    leaveEverything();
+    render();
+  };
   if (inHopChat || inChannel) {
-    showConfirmBar(() => {
-      tabs.forEach(x => x.classList.remove('active'));
-      tabs.find(x => x.dataset.mode === m).classList.add('active');
-      mode = m;
-      leaveEverything();
-      render();
-    });
+    showConfirmBar(doSwitch);
     return;
   }
-  tabs.forEach(x => x.classList.remove('active'));
-  tabs.find(x => x.dataset.mode === m).classList.add('active');
-  mode = m;
-  leaveEverything();
-  render();
+  doSwitch();
 }
 
 function closeLobby() {
@@ -323,7 +319,7 @@ function connectPair() {
   startHeartbeat(pairChan, true);
   pairChan.onmessage = (e) => {
     const m = e.data;
-    if (m.type === 'heartbeat' && m.from !== myId) { lastPeerHeard = Date.now(); if (peerDead && hbIsPair) recoverPeer(); return; }
+    if (m.type === 'heartbeat' && m.from !== myId) { lastPeerHeard = Date.now(); if (peerDead) recoverPeer(); return; }
     if (m.from === myId) return;
     if (m.type === 'msg' && typeof m.text === 'string') appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id);
     else if (m.type === 'typing') setTyping(pairPeerName, m.state === true);
@@ -393,6 +389,7 @@ function joinChannel(name) {
   channelChan.onmessage = (e) => {
     const m = e.data;
     if (m.from === myId) return;
+    if (m.type === 'heartbeat') { lastPeerHeard = Date.now(); return; }
     if (m.type === 'msg' && typeof m.text === 'string')
       appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id);
     else if (m.type === 'typing') setTyping(sanitizeName(m.fromName), m.state === true);
@@ -423,7 +420,7 @@ function startHeartbeat(chan, isPair) {
   lastPeerHeard = Date.now();
   peerDead = false;
   hbInterval = setInterval(() => { if (chan) chan.postMessage({ type: 'heartbeat', from: myId }); }, 4000);
-  hbWatch = setInterval(() => { if (hbIsPair && !peerDead && Date.now() - lastPeerHeard > 20000) onPeerDead(); }, 5000);
+  hbWatch = setInterval(() => { if (!peerDead && Date.now() - lastPeerHeard > 20000) onPeerDead(); }, 5000);
 }
 function stopHeartbeat() {
   if (hbInterval) clearInterval(hbInterval);
@@ -433,9 +430,13 @@ function stopHeartbeat() {
 }
 function onPeerDead() {
   peerDead = true;
-  pushSystemMsg(`${pairPeerName} disconnected.`);
-  disableComposer();
-  showDisconnectedBar();
+  stopHeartbeat();
+  const name = hbIsPair ? pairPeerName : (currentChannelName ? 'Someone' : pairPeerName);
+  pushSystemMsg(`${name || 'Peer'} disconnected.`);
+  if (hbIsPair) {
+    disableComposer();
+    showDisconnectedBar();
+  }
   const dot = document.querySelector('.online-dot');
   if (dot) { dot.style.background = 'var(--text-dim)'; dot.style.boxShadow = 'none'; }
 }
@@ -490,10 +491,12 @@ function renderChat({ peer, onLeave, isChannel }) {
       charCount.classList.remove('warn');
     }
     clearTimeout(typingDebounceTimer);
-    typingDebounceTimer = setTimeout(() => {
-      if (hasText && !iAmTyping) { iAmTyping = true; sendTypingState(true); }
-      else if (!hasText && iAmTyping) { iAmTyping = false; sendTypingState(false); }
-    }, 500);
+    if (!hasText && iAmTyping) { iAmTyping = false; sendTypingState(false); return; }
+    if (hasText) {
+      typingDebounceTimer = setTimeout(() => {
+        if (!iAmTyping && input.value.trim() !== '') { iAmTyping = true; sendTypingState(true); }
+      }, 300);
+    }
   };
 
   const emojiBtn = document.createElement('button');
@@ -529,6 +532,7 @@ function renderChat({ peer, onLeave, isChannel }) {
       return;
     }
     if (iAmTyping) { iAmTyping = false; sendTypingState(false); }
+    clearTimeout(typingDebounceTimer);
     playClick();
     const mid = randHex(8);
     appendMsg(text, 'me', undefined, mid);
