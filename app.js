@@ -40,11 +40,9 @@ function makeChannel(name, selfEcho = false) {
   let subscribed = false;
   const queue = [];
   channel.on('broadcast', { event: 'data' }, (msg) => {
-    console.log('[WL] recv on', name, msg.payload);
     if (handler) handler({ data: msg.payload });
   });
   channel.subscribe((status) => {
-    console.log('[WL] channel', name, 'status:', status);
     if (status === 'SUBSCRIBED') {
       subscribed = true;
       queue.splice(0).forEach(([p, res]) =>
@@ -58,15 +56,12 @@ function makeChannel(name, selfEcho = false) {
     set onmessage(fn) { handler = fn; },
     async postMessage(payload) {
       if (!subscribed) {
-        console.log('[WL] queued (not subscribed yet):', payload.type, 'on', name);
         return new Promise(resolve => queue.push([payload, resolve]));
       }
-      console.log('[WL] send on', name, payload);
       try {
         const res = await channel.send({ type: 'broadcast', event: 'data', payload });
-        console.log('[WL] send result:', res);
         return 'ok';
-      } catch(e) { console.error('[WL] send error:', e); return 'error'; }
+      } catch(e) { return 'error'; }
     },
     close() { closed = true; sb.removeChannel(channel); }
   };
@@ -307,13 +302,14 @@ function handleLobby(e) {
 function connectPair() {
   hopState = 'matched';
   if (lobbyChan) { lobbyChan.close(); lobbyChan = null; }
-  pairChan = makeChannel(pairRoom, false);
+  pairChan = makeChannel(pairRoom, true);
   render();
   pushSystemMsg(`Connected to ${pairPeerName}.`);
   startHeartbeat(pairChan, true);
   pairChan.onmessage = (e) => {
     const m = e.data;
-    if (m.type === 'heartbeat') { lastPeerHeard = Date.now(); if (peerDead && hbIsPair) recoverPeer(); return; }
+    if (m.type === 'heartbeat' && m.from !== myId) { lastPeerHeard = Date.now(); if (peerDead && hbIsPair) recoverPeer(); return; }
+    if (m.from === myId) return;
     if (m.type === 'msg' && typeof m.text === 'string') appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id);
     else if (m.type === 'typing') setTyping(pairPeerName, m.state === true);
     else if (m.type === 'react' && m.mid) applyReaction(m.mid, m.emoji, m.from, m.add === true);
@@ -334,6 +330,7 @@ function leaveHop() {
   stopHeartbeat();
   hopState = 'idle';
   pairPeerName = null;
+  takenIds.clear();
   render();
 }
 
@@ -370,18 +367,19 @@ function renderChannelList() {
 function joinChannel(name) {
   if (typeof name !== 'string' || !CHANNEL_NAME_RE.test(name)) return;
   currentChannelName = name;
-  channelChan = makeChannel('wavelength-room-' + name, false);
+  channelChan = makeChannel('wavelength-room-' + name, true);
   if (!channelChan) return;
   render();
   pushSystemMsg(`You joined #${escapeHtml(name)} as ${escapeHtml(myName)}.`);
   startHeartbeat(channelChan, false);
   channelChan.onmessage = (e) => {
     const m = e.data;
-    if (m.type === 'msg' && m.from !== myId && typeof m.text === 'string')
+    if (m.from === myId) return;
+    if (m.type === 'msg' && typeof m.text === 'string')
       appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id);
-    else if (m.type === 'typing' && m.from !== myId) setTyping(sanitizeName(m.fromName), m.state === true);
-    else if (m.type === 'join' && m.from !== myId) pushSystemMsg(`${sanitizeName(m.fromName)} joined.`);
-    else if (m.type === 'leave' && m.from !== myId) {
+    else if (m.type === 'typing') setTyping(sanitizeName(m.fromName), m.state === true);
+    else if (m.type === 'join') pushSystemMsg(`${sanitizeName(m.fromName)} joined.`);
+    else if (m.type === 'leave') {
       setTyping(sanitizeName(m.fromName), false);
       pushSystemMsg(`${sanitizeName(m.fromName)} left.`);
     }
@@ -407,7 +405,7 @@ function startHeartbeat(chan, isPair) {
   lastPeerHeard = Date.now();
   peerDead = false;
   hbInterval = setInterval(() => { if (chan) chan.postMessage({ type: 'heartbeat', from: myId }); }, 4000);
-  hbWatch = setInterval(() => { if (hbIsPair && !peerDead && Date.now() - lastPeerHeard > 12000) onPeerDead(); }, 4000);
+  hbWatch = setInterval(() => { if (hbIsPair && !peerDead && Date.now() - lastPeerHeard > 20000) onPeerDead(); }, 5000);
 }
 function stopHeartbeat() {
   if (hbInterval) clearInterval(hbInterval);
