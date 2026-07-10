@@ -40,7 +40,7 @@ function makeChannel(name, selfEcho = false) {
   let subscribed = false;
   const queue = [];
   channel.on('broadcast', { event: 'data' }, (msg) => {
-    console.log('[WL] recv', name, msg);
+    console.log('[WL] recv', name, JSON.stringify(msg.payload));
     if (handler) handler({ data: msg.payload });
   });
   channel.subscribe((status) => {
@@ -311,6 +311,7 @@ function connectPair() {
   startHeartbeat(pairChan, true);
   pairChan.onmessage = (e) => {
     const m = e.data;
+    console.log('[WL] pairHandler', JSON.stringify(m), 'myId=', myId);
     if (m.type === 'heartbeat' && m.from !== myId) { lastPeerHeard = Date.now(); if (peerDead && hbIsPair) recoverPeer(); return; }
     if (m.from === myId) return;
     if (m.type === 'msg' && typeof m.text === 'string') appendMsg(m.text.slice(0, 500), 'them', sanitizeName(m.fromName), m.id);
