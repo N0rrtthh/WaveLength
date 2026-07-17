@@ -27,8 +27,30 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          sed -i "s|<meta name=\"supabase-url\" content=\"\">|<meta name=\"supabase-url\" content=\"${SUPABASE_URL}\">|" index.html
-          sed -i "s|<meta name=\"supabase-anon-key\" content=\"\">|<meta name=\"supabase-anon-key\" content=\"${SUPABASE_ANON_KEY}\">|" index.html
+          python3 - <<'PYEOF'
+          import os, re
+
+          url = os.environ['SUPABASE_URL']
+          key = os.environ['SUPABASE_ANON_KEY']
+
+          with open('index.html', 'r') as f:
+              html = f.read()
+
+          html = html.replace(
+              '<meta name="supabase-url" content="">',
+              f'<meta name="supabase-url" content="{url}">'
+          )
+          html = html.replace(
+              '<meta name="supabase-anon-key" content="">',
+              f'<meta name="supabase-anon-key" content="{key}">'
+          )
+
+          with open('index.html', 'w') as f:
+              f.write(html)
+
+          print(f"URL injected: {'yes' if url in html else 'NO - FAILED'}")
+          print(f"Key injected: {'yes' if key in html else 'NO - FAILED'}")
+          PYEOF
 
       - uses: actions/configure-pages@v5
 
