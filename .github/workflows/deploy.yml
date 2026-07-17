@@ -38,17 +38,12 @@ jobs:
 
       - name: Inject config
         run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
-            echo "ERROR: SUPABASE_URL or SUPABASE_ANON_KEY secret is not set"
-            exit 1
-          fi
-          printf 'window.WAVELENGTH_CONFIG = { supabaseUrl: "%s", supabaseAnonKey: "%s" };
-' \
-            "$SUPABASE_URL" \
-            "$SUPABASE_ANON_KEY" > config.js
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          cat > config.js <<EOF
+          window.WAVELENGTH_CONFIG = {
+            supabaseUrl: '${{ secrets.SUPABASE_URL }}',
+            supabaseAnonKey: '${{ secrets.SUPABASE_ANON_KEY }}',
+          };
+          EOF
 
       - uses: actions/configure-pages@v5
 
@@ -58,4 +53,3 @@ jobs:
 
       - uses: actions/deploy-pages@v5
         id: deployment
-        timeout-minutes: 10
