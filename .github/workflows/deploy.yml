@@ -27,8 +27,19 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          sed -i "s|<meta name=\"supabase-url\" content=\"\">|<meta name=\"supabase-url\" content=\"${SUPABASE_URL}\">|" index.html
-          sed -i "s|<meta name=\"supabase-anon-key\" content=\"\">|<meta name=\"supabase-anon-key\" content=\"${SUPABASE_ANON_KEY}\">|" index.html
+          python3 - <<'PYEOF'
+          import os, re
+          url = os.environ['SUPABASE_URL']
+          key = os.environ['SUPABASE_ANON_KEY']
+          with open('index.html', 'r') as f:
+            html = f.read()
+          html = re.sub(r'(<meta name="supabase-url" content=")[^"]*(")', r'\g<1>' + url + r'\2', html)
+          html = re.sub(r'(<meta name="supabase-anon-key" content=")[^"]*(")', r'\g<1>' + key + r'\2', html)
+          with open('index.html', 'w') as f:
+            f.write(html)
+          print('URL injected:', url[:30] + '...')
+          print('Key injected:', key[:10] + '...')
+          PYEOF
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
