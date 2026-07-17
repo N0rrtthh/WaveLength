@@ -22,14 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Inject config
+      - name: Inject secrets into meta tags
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          echo "window.WAVELENGTH_CONFIG = { supabaseUrl: '${SUPABASE_URL}', supabaseAnonKey: '${SUPABASE_ANON_KEY}' };" > config.js
-          echo "--- config.js preview (key masked) ---"
-          head -c 60 config.js
+          sed -i "s|<meta name=\"supabase-url\" content=\"\">|<meta name=\"supabase-url\" content=\"${SUPABASE_URL}\">|" index.html
+          sed -i "s|<meta name=\"supabase-anon-key\" content=\"\">|<meta name=\"supabase-anon-key\" content=\"${SUPABASE_ANON_KEY}\">|" index.html
 
       - uses: actions/configure-pages@v5
 

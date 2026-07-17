@@ -1,5 +1,5 @@
-const SUPABASE_URL = window.WAVELENGTH_CONFIG?.supabaseUrl ?? '';
-function getAnonKey() { return window.WAVELENGTH_CONFIG?.supabaseAnonKey ?? ''; }
+const SUPABASE_URL = document.querySelector('meta[name="supabase-url"]')?.content ?? '';
+function getAnonKey() { return document.querySelector('meta[name="supabase-anon-key"]')?.content ?? ''; }
 
 // Helpers hoisted to top so they're available everywhere immediately
 function escapeHtml(s) {
